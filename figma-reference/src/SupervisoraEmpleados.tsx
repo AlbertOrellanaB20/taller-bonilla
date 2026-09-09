@@ -2,7 +2,7 @@ import { MECHANICS } from "./SupervisoraHome";
 
 // ── Static employee data (read-only, no admin) ─────────────────────────────
 
-type Role = "Supervisora" | "Cajero" | "Mecánico" | "Inventario";
+type Role = "Supervisora" | "Secretario/a" | "Mecánico" | "Inventario";
 
 interface Employee {
   name: string;
@@ -15,7 +15,7 @@ interface Employee {
 
 const EMPLOYEES: Employee[] = [
   { name: "Nahomy Guzmán",   role: "Supervisora", email: "nguzman@tallerbonilla.cl",    active: true },
-  { name: "Emely Rodríguez", role: "Cajero",      email: "erodriguez@tallerbonilla.cl", active: true },
+  { name: "Emely Rodríguez", role: "Secretario/a", email: "erodriguez@tallerbonilla.cl", active: true },
   { name: "Noé Arias",       role: "Mecánico",    email: "narias@tallerbonilla.cl",     active: true, activeOrders: 3, specialty: "Motor y frenos" },
   { name: "Pedro Salazar",   role: "Mecánico",    email: "psalazar@tallerbonilla.cl",   active: true, activeOrders: 2, specialty: "Suspensión y alineación" },
   { name: "José Ramírez",    role: "Mecánico",    email: "jramirez@tallerbonilla.cl",   active: true, activeOrders: 2, specialty: "Electricidad automotriz" },
@@ -24,7 +24,7 @@ const EMPLOYEES: Employee[] = [
 
 const ROLE_STYLE: Record<Role, { bg: string; color: string }> = {
   "Supervisora": { bg: "rgba(249,115,22,0.15)",  color: "#fb923c" },
-  "Cajero":      { bg: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
+  "Secretario/a": { bg: "rgba(59,130,246,0.15)",  color: "#60a5fa" },
   "Mecánico":    { bg: "rgba(34,197,94,0.15)",   color: "#4ade80" },
   "Inventario":  { bg: "rgba(139,92,246,0.15)",  color: "#a78bfa" },
 };

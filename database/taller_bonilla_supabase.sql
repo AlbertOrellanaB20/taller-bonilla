@@ -228,9 +228,22 @@ RETURNS TEXT AS $$
     WHERE u.auth_user_id = auth.uid()
 $$ LANGUAGE sql STABLE;
 
--- Ejemplo: solo Administrador y Cajero pueden ver todas las facturas
-CREATE POLICY "facturas_admin_cajero" ON factura
-FOR SELECT USING (fn_rol_actual() IN ('Administrador', 'Cajero'));
+-- Cada usuario puede leer su propia fila en `usuario`. Es indispensable:
+-- sin esto, después de iniciar sesión la app no puede saber qué rol tiene
+-- el usuario (el login y el proxy/middleware de rutas dependen de esto).
+CREATE POLICY "usuario_lee_su_propia_fila" ON usuario
+FOR SELECT USING (auth_user_id = auth.uid());
+
+-- El Administrador tiene control total sobre la tabla de usuarios.
+CREATE POLICY "usuario_admin_control_total" ON usuario
+FOR ALL USING (fn_rol_actual() = 'Administrador')
+WITH CHECK (fn_rol_actual() = 'Administrador');
+
+-- Solo Administrador y Secretario/a pueden ver todas las facturas
+-- (nombre de rol corregido: antes decía 'Cajero', que ya no existe en la
+-- tabla `rol` — el rol final se llama 'Secretario/a', ver sección 6 arriba).
+CREATE POLICY "facturas_admin_secretaria" ON factura
+FOR SELECT USING (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
 
 -- 9. REALTIME: habilitar para que los cambios se reflejen en vivo en el frontend
 ALTER PUBLICATION supabase_realtime ADD TABLE orden_servicio;

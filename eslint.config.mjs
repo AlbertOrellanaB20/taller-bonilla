@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Proyecto de referencia exportado de Figma Make — no se instala ni se
+    // ejecuta, solo se usa como guía visual (ver AGENTS.md en esa carpeta).
+    "figma-reference/**",
   ]),
 ]);
 
