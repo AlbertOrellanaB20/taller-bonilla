@@ -100,17 +100,19 @@ Ambos ya los corriste en el SQL Editor de Supabase — quedan documentados aquí
 
 Con tus credenciales reales de Supabase, creé las 5 cuentas del equipo (Supabase Auth + su fila en la tabla `usuario`) y probé el login de cada una de principio a fin, por HTTP real (no simulado) contra `npm run dev`.
 
-### Usuarios y contraseñas
+### Usuarios
 
-| Nombre | Usuario | Rol | Contraseña |
-|---|---|---|---|
-| Alberto Orellana | `aorellana` | Administrador | `Adm1n$TallerB26` |
-| Nahomy Alexandra Guzmán | `nguzman` | Supervisora | `Superv1sa#2026` |
-| Emely Lissbeth Rodríguez | `erodriguez` | Secretario/a | `Secret4ria!2026` |
-| Noé Alexander Arias | `narias` | Mecánico | `Mecan1co&2026` |
-| José Luis Rodas | `jrodas` | Inventario | `Inventar1o@2026` |
+| Nombre | Usuario | Rol |
+|---|---|---|
+| Alberto Orellana | `aorellana` | Administrador |
+| Nahomy Alexandra Guzmán | `nguzman` | Supervisora |
+| Emely Lissbeth Rodríguez | `erodriguez` | Secretario/a |
+| Noé Alexander Arias | `narias` | Mecánico |
+| José Luis Rodas | `jrodas` | Inventario |
 
-El correo interno de cada uno es `usuario@tallerbonilla.sv` (nunca se muestra en pantalla, el login es por nombre de usuario). **Recomiendo que cada persona cambie su contraseña la primera vez que pueda** — hoy el sistema todavía no tiene una pantalla de "cambiar mi contraseña", así que por ahora quedan como te las dejo aquí.
+El correo interno de cada uno es `usuario@tallerbonilla.sv` (nunca se muestra en pantalla, el login es por nombre de usuario).
+
+**Nota de seguridad:** este documento llegó a contener las 5 contraseñas reales en texto plano — no debió guardarse así en un archivo versionado. Las contraseñas ya fueron rotadas; las nuevas se entregaron solo por chat, nunca en un archivo de git. **Recomiendo que cada persona cambie su contraseña la primera vez que pueda** — hoy el sistema todavía no tiene una pantalla de "cambiar mi contraseña".
 
 ### Un bug real y grave que encontré (y ya corregí) al probar
 
