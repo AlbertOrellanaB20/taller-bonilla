@@ -237,6 +237,33 @@ ALTER TABLE usuario ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orden_servicio ENABLE ROW LEVEL SECURITY;
 ALTER TABLE factura ENABLE ROW LEVEL SECURITY;
 
+-- 8.0.1 Catálogos de solo lectura (rol, estado_orden, estado_factura,
+-- metodo_pago, servicio): Supabase activa RLS por defecto en las tablas
+-- nuevas aunque este script no lo pida explícitamente. Sin una política,
+-- eso las deja invisibles para anon/authenticated (solo service_role las ve,
+-- porque ese rol se salta RLS) — y el login necesita leer `rol` para saber
+-- qué rol tiene cada usuario. Como son solo catálogos de nombres (no hay
+-- nada sensible), se abren de lectura para cualquier usuario autenticado.
+ALTER TABLE rol ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "rol_lectura_autenticados" ON rol
+FOR SELECT USING (auth.role() = 'authenticated');
+
+ALTER TABLE estado_orden ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "estado_orden_lectura_autenticados" ON estado_orden
+FOR SELECT USING (auth.role() = 'authenticated');
+
+ALTER TABLE estado_factura ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "estado_factura_lectura_autenticados" ON estado_factura
+FOR SELECT USING (auth.role() = 'authenticated');
+
+ALTER TABLE metodo_pago ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "metodo_pago_lectura_autenticados" ON metodo_pago
+FOR SELECT USING (auth.role() = 'authenticated');
+
+ALTER TABLE servicio ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "servicio_lectura_autenticados" ON servicio
+FOR SELECT USING (auth.role() = 'authenticated');
+
 -- Función helper: obtiene el rol del usuario autenticado actual
 CREATE OR REPLACE FUNCTION fn_rol_actual()
 RETURNS TEXT AS $$
