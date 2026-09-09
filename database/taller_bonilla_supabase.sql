@@ -216,6 +216,23 @@ FOR EACH ROW EXECUTE FUNCTION trg_detalle_servicio_change();
 
 -- 8. SEGURIDAD A NIVEL DE FILA (RLS) — ejemplo base, se debe extender por tabla
 -- siguiendo la tabla de permisos por módulo/rol documentada en CLAUDE.md
+
+-- 8.0 PERMISOS BASE (GRANTs) — sin esto, NINGUNA tabla se puede leer ni desde
+-- el frontend (anon/authenticated) ni desde el servidor (service_role), sin
+-- importar si tiene RLS o no: Postgres exige el GRANT de tabla ANTES de que
+-- las políticas de RLS entren en juego. Si al probar el login o cualquier
+-- consulta ves el error "permission denied for table ..." con un hint que
+-- dice "GRANT SELECT ON public.<tabla> TO ...", es porque falta correr esto.
+-- Es el permiso base que Supabase normalmente deja configurado de fábrica;
+-- si tu proyecto no lo trae, corre esto una sola vez:
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON ROUTINES TO anon, authenticated, service_role;
+
 ALTER TABLE usuario ENABLE ROW LEVEL SECURITY;
 ALTER TABLE orden_servicio ENABLE ROW LEVEL SECURITY;
 ALTER TABLE factura ENABLE ROW LEVEL SECURITY;
