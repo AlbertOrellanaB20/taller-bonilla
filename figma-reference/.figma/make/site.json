@@ -1,0 +1,10 @@
+{
+  "description": "Streamline automotive workshop management with an interactive login interface that enhances user experience and accessibility for technicians and administrators.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
