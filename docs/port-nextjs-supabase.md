@@ -81,22 +81,53 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 La encuentras en Supabase → Project Settings → API → `service_role`. **Nunca la subas a GitHub ni la pongas en el frontend** — solo se usa del lado del servidor para el login.
 
+### 5.1. Dos problemas más que aparecieron al probar con tu proyecto real (ya resueltos, ya los corriste)
+
+Al intentar crear las cuentas reales encontré dos problemas más, **normales de un proyecto nuevo de Supabase**, no relacionados con el código:
+
+1. **Permisos base (GRANT) faltantes.** Ninguna tabla se podía leer — ni siquiera con la llave de servicio — porque Postgres nunca tuvo el permiso base otorgado sobre las tablas (esto es distinto de RLS; Postgres lo revisa antes). Se corrigió con `GRANT ... TO anon, authenticated, service_role` (sección 8.0 del SQL).
+2. **Catálogos bloqueados por RLS activado por defecto.** Supabase activa RLS automáticamente en tablas nuevas aunque el script no lo pida. Sin política, tablas como `rol` quedaban invisibles para cualquier usuario normal (solo la llave de servicio las veía). Como el login necesita leer `rol`, se agregaron políticas de lectura para usuarios autenticados en `rol`, `estado_orden`, `estado_factura`, `metodo_pago` y `servicio` (sección 8.0.1 del SQL).
+
+Ambos ya los corriste en el SQL Editor de Supabase — quedan documentados aquí por si algún día recreas el proyecto desde cero con el script completo.
+
 ## 6. PWA (instalable desde el navegador)
 
 - `src/app/manifest.ts` — nombre, colores, ícono.
 - `src/app/icon.png` y `src/app/apple-icon.png` — íconos (generados a partir del logo; como el logo original es rectangular y no cuadrado, se ve un poco estirado como ícono — si quieres un ícono cuadrado más prolijo más adelante, lo puedo generar aparte).
 - `public/sw.js` — service worker mínimo, solo lo necesario para que Chrome/Android lo reconozca como instalable. No guarda en caché nada con tu sesión ni datos en vivo, porque el sistema depende de Supabase.
 
-## 7. Verificación que hice
+## 7. Las 5 cuentas reales y la verificación completa que hice
 
-- `npm run build` — compila sin errores.
+Con tus credenciales reales de Supabase, creé las 5 cuentas del equipo (Supabase Auth + su fila en la tabla `usuario`) y probé el login de cada una de principio a fin, por HTTP real (no simulado) contra `npm run dev`.
+
+### Usuarios y contraseñas
+
+| Nombre | Usuario | Rol | Contraseña |
+|---|---|---|---|
+| Alberto Orellana | `aorellana` | Administrador | `Adm1n$TallerB26` |
+| Nahomy Alexandra Guzmán | `nguzman` | Supervisora | `Superv1sa#2026` |
+| Emely Lissbeth Rodríguez | `erodriguez` | Secretario/a | `Secret4ria!2026` |
+| Noé Alexander Arias | `narias` | Mecánico | `Mecan1co&2026` |
+| José Luis Rodas | `jrodas` | Inventario | `Inventar1o@2026` |
+
+El correo interno de cada uno es `usuario@tallerbonilla.sv` (nunca se muestra en pantalla, el login es por nombre de usuario). **Recomiendo que cada persona cambie su contraseña la primera vez que pueda** — hoy el sistema todavía no tiene una pantalla de "cambiar mi contraseña", así que por ahora quedan como te las dejo aquí.
+
+### Un bug real y grave que encontré (y ya corregí) al probar
+
+Mientras probaba que cada rol entrara solo a su propio panel, encontré que **cualquier usuario logueado podía entrar al panel de cualquier otro rol** con solo escribir la URL (ej. Emely podía abrir `/admin` sin problema). Esto no tiene que ver con contraseñas ni con Supabase — era un bug real en cómo Next.js 16 ubica el archivo `proxy.ts`.
+
+Next.js 16 exige que `proxy.ts` esté **dentro de `src/`** cuando el proyecto usa `src/app/` (como este) — antes lo tenía en la raíz del proyecto, que era donde vivía el `middleware.ts` viejo, pero la convención nueva es más estricta. Al estar en el lugar equivocado, Next.js nunca lo ejecutaba, así que la validación de "¿tu rol puede entrar aquí?" simplemente no corría nunca — solo quedaba en pie el chequeo de "¿hay alguien logueado?" (que no le importa el rol). Ya lo moví a `src/proxy.ts` y quedó confirmado en el build (`ƒ Proxy (Middleware)` aparece en la salida, antes no aparecía).
+
+### Qué probé y confirmé, con las 5 cuentas reales
+
+- **Login de cada uno de los 5** por el formulario real (no un atajo): usuario + contraseña → Supabase Auth real → cookie de sesión real → redirección al panel correcto.
+- **Cada uno entra a su propio panel** (código 200): Alberto a `/admin`, Nahomy a `/supervisora`, Emely a `/secretaria`, Noé a `/mecanico`, José Luis a `/inventario`.
+- **Ningún rol puede entrar al panel de otro** (después de corregir el bug de `proxy.ts`): probé las 5 combinaciones cruzadas y todas redirigen correctamente a su propio panel en vez de dejarlos entrar.
+- `npm run build` — compila sin errores, y ahora muestra `ƒ Proxy (Middleware)` confirmando que el proxy está activo.
 - `npm run lint` — sin errores ni advertencias.
-- Levanté el servidor de desarrollo con credenciales de prueba (falsas) y confirmé que:
-  - `/` redirige a `/login`.
-  - `/login` carga bien (código 200).
-  - `/admin` sin sesión redirige correctamente a `/login` (nadie puede entrar sin loguearse).
+- Sin sesión, cualquier panel redirige a `/login`.
 
-No pude probar el login completo de principio a fin porque este entorno no tiene tus credenciales reales de Supabase — eso lo vas a poder probar tú en cuanto pongas tu `.env.local` con los datos reales y corras el SQL de la sección 5.
+**Todo funcionó** una vez corregido el bug de ubicación de `proxy.ts`. No quedó nada pendiente de esta prueba.
 
 ## 8. Lo que queda pendiente (fuera de lo que pediste ahora)
 
