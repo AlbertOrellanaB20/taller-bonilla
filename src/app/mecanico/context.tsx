@@ -1,7 +1,16 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
-import { type MechanicOrder, INITIAL_ORDERS, NEXT_STATUS, STATUS_STYLE, PARTS_CATALOG } from "./lib/data";
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+  listOrdenesMecanico,
+  avanzarEstadoOrden,
+  marcarServicioCompletado,
+  agregarRepuestoAOrden,
+  type MechanicOrder,
+} from "@/lib/domain/ordenes";
+import type { Part } from "@/lib/domain/inventario";
+import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
+import { STATUS_STYLE } from "./lib/data";
 
 interface MecanicoDataValue {
   orders: MechanicOrder[];
@@ -17,42 +26,45 @@ export function useMecanicoData(): MecanicoDataValue {
   return ctx;
 }
 
-export function MecanicoDataProvider({ children }: { children: ReactNode }) {
-  const [orders, setOrders] = useState<MechanicOrder[]>(INITIAL_ORDERS);
+export function MecanicoDataProvider({
+  children,
+  initialOrders,
+  partsCatalog,
+}: {
+  children: ReactNode;
+  initialOrders: MechanicOrder[];
+  partsCatalog: Part[];
+}) {
+  const [orders, setOrders] = useState<MechanicOrder[]>(initialOrders);
   const [detailId, setDetailId] = useState<number | null>(null);
 
-  function advanceStatus(id: number) {
-    setOrders((prev) => prev.map((o) => {
-      if (o.id !== id) return o;
-      const next = NEXT_STATUS[o.status];
-      return next ? { ...o, status: next } : o;
-    }));
+  const refetch = useCallback(async () => {
+    setOrders(await listOrdenesMecanico());
+  }, []);
+
+  useRealtimeTable(["orden_servicio", "detalle_servicio", "detalle_repuesto"], refetch);
+
+  async function advanceStatus(id: number) {
+    await avanzarEstadoOrden(id);
+    await refetch();
   }
 
-  function toggleService(orderId: number, idx: number) {
-    setOrders((prev) => prev.map((o) => {
-      if (o.id !== orderId) return o;
-      const servicesDone = [...o.servicesDone];
-      servicesDone[idx] = !servicesDone[idx];
-      return { ...o, servicesDone };
-    }));
+  async function toggleService(orderId: number, idx: number) {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    const detalleId = order.servicesDoneIds[idx];
+    await marcarServicioCompletado(detalleId, !order.servicesDone[idx]);
+    await refetch();
   }
 
-  function addPart(orderId: number, name: string, qty: number) {
-    setOrders((prev) => prev.map((o) => {
-      if (o.id !== orderId) return o;
-      const existing = o.parts.findIndex((p) => p.name === name);
-      if (existing >= 0) {
-        const parts = [...o.parts];
-        parts[existing] = { ...parts[existing], qty: parts[existing].qty + qty };
-        return { ...o, parts };
-      }
-      return { ...o, parts: [...o.parts, { name, qty }] };
-    }));
+  async function addPart(orderId: number, repuestoId: number, qty: number) {
+    await agregarRepuestoAOrden(orderId, repuestoId, qty);
+    await refetch();
   }
 
-  function finalizeOrder(id: number) {
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status: "Finalizado" } : o)));
+  async function finalizeOrder(id: number) {
+    await avanzarEstadoOrden(id);
+    await refetch();
   }
 
   const detailOrder = orders.find((o) => o.id === detailId) ?? null;
@@ -63,6 +75,7 @@ export function MecanicoDataProvider({ children }: { children: ReactNode }) {
       {detailOrder && (
         <OrderDetailModal
           order={detailOrder}
+          partsCatalog={partsCatalog}
           onClose={() => setDetailId(null)}
           onToggleService={toggleService}
           onAddPart={addPart}
@@ -75,30 +88,55 @@ export function MecanicoDataProvider({ children }: { children: ReactNode }) {
 
 // ── Order Detail Modal ────────────────────────────────────────────────────────
 
-function OrderDetailModal({ order, onClose, onToggleService, onAddPart, onFinalize }: {
+function OrderDetailModal({
+  order,
+  partsCatalog,
+  onClose,
+  onToggleService,
+  onAddPart,
+  onFinalize,
+}: {
   order: MechanicOrder;
+  partsCatalog: Part[];
   onClose: () => void;
-  onToggleService: (orderId: number, idx: number) => void;
-  onAddPart: (orderId: number, name: string, qty: number) => void;
-  onFinalize: (orderId: number) => void;
+  onToggleService: (orderId: number, idx: number) => Promise<void>;
+  onAddPart: (orderId: number, repuestoId: number, qty: number) => Promise<void>;
+  onFinalize: (orderId: number) => Promise<void>;
 }) {
-  const [selectedPart, setSelectedPart] = useState("");
+  const [selectedPart, setSelectedPart] = useState<number | "">("");
   const [qty, setQty] = useState(1);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const st = STATUS_STYLE[order.status];
   const donePct = order.services.length > 0 ? Math.round((order.servicesDone.filter(Boolean).length / order.services.length) * 100) : 0;
 
-  function handleAddPart() {
+  async function handleAddPart() {
     if (!selectedPart) return;
-    onAddPart(order.id, selectedPart, qty);
-    setSelectedPart("");
-    setQty(1);
+    setError(null);
+    setBusy(true);
+    try {
+      await onAddPart(order.id, selectedPart, qty);
+      setSelectedPart("");
+      setQty(1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo agregar el repuesto.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function handleFinalize() {
-    onFinalize(order.id);
-    setShowSuccess(true);
-    setTimeout(() => { setShowSuccess(false); onClose(); }, 2000);
+  async function handleFinalize() {
+    setError(null);
+    setBusy(true);
+    try {
+      await onFinalize(order.id);
+      setShowSuccess(true);
+      setTimeout(() => { setShowSuccess(false); onClose(); }, 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo finalizar la orden.");
+      setBusy(false);
+    }
   }
 
   const inputStyle = { background: "#252529", border: "1.5px solid #35353a", color: "#f0f0f2", borderRadius: 8, padding: "10px 14px", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" as const };
@@ -154,13 +192,6 @@ function OrderDetailModal({ order, onClose, onToggleService, onAddPart, onFinali
             </div>
           </div>
 
-          {order.notes && (
-            <div style={{ background: "rgba(234,179,8,0.06)", border: "1px solid rgba(234,179,8,0.2)", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 10 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#facc15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-              <span style={{ color: "#d4b54a", fontSize: 13 }}>{order.notes}</span>
-            </div>
-          )}
-
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
               <span style={{ color: "#8a8a96", fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Servicios a realizar</span>
@@ -203,22 +234,22 @@ function OrderDetailModal({ order, onClose, onToggleService, onAddPart, onFinali
               </div>
             )}
 
-            {order.status !== "Finalizado" && (
+            {order.status !== "Finalizado" && order.status !== "Entregado" && (
               <div style={{ background: "#252529", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ color: "#5a5a65", fontSize: 12 }}>Agregar repuesto del catálogo</div>
+                <div style={{ color: "#5a5a65", fontSize: 12 }}>Agregar repuesto del inventario</div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <div style={{ position: "relative", flex: 1 }}>
-                    <select value={selectedPart} onChange={(e) => setSelectedPart(e.target.value)}
+                    <select value={selectedPart} onChange={(e) => setSelectedPart(e.target.value ? Number(e.target.value) : "")}
                       style={{ ...inputStyle, appearance: "none", cursor: "pointer", paddingRight: 32, color: selectedPart ? "#f0f0f2" : "#5a5a65" }}>
                       <option value="">Seleccionar repuesto...</option>
-                      {PARTS_CATALOG.map((p) => <option key={p} value={p}>{p}</option>)}
+                      {partsCatalog.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.stock} disp.)</option>)}
                     </select>
                     <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#5a5a65", fontSize: 11 }}>▾</span>
                   </div>
                   <input type="number" min={1} max={99} value={qty} onChange={(e) => setQty(Math.max(1, Number(e.target.value)))}
                     style={{ ...inputStyle, width: 64, textAlign: "center", flexShrink: 0 }} />
                 </div>
-                <button onClick={handleAddPart} disabled={!selectedPart}
+                <button onClick={handleAddPart} disabled={!selectedPart || busy}
                   style={{ background: selectedPart ? "rgba(163,18,18,0.12)" : "transparent", border: `1px solid ${selectedPart ? "rgba(163,18,18,0.35)" : "#2a2a2e"}`, borderRadius: 8, padding: "10px 16px", color: selectedPart ? "#f87171" : "#5a5a65", fontSize: 13, fontWeight: 600, cursor: selectedPart ? "pointer" : "not-allowed", transition: "all .2s" }}
                   onMouseEnter={(e) => { if (selectedPart) { e.currentTarget.style.background = "#A31212"; e.currentTarget.style.color = "#fff"; } }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = selectedPart ? "rgba(163,18,18,0.12)" : "transparent"; e.currentTarget.style.color = selectedPart ? "#f87171" : "#5a5a65"; }}>
@@ -228,8 +259,14 @@ function OrderDetailModal({ order, onClose, onToggleService, onAddPart, onFinali
             )}
           </div>
 
+          {error && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "10px 14px", color: "#e87070", fontSize: 13 }}>
+              {error}
+            </div>
+          )}
+
           {order.status === "En Proceso" && (
-            <button onClick={handleFinalize}
+            <button onClick={handleFinalize} disabled={busy}
               style={{ width: "100%", background: "linear-gradient(135deg,#22c55e,#16a34a)", border: "none", borderRadius: 14, padding: "16px 20px", color: "#fff", fontSize: 16, fontWeight: 700, cursor: "pointer", letterSpacing: "-0.01em", transition: "opacity 0.15s, transform 0.1s" }}
               onMouseEnter={(e) => { e.currentTarget.style.opacity = "0.88"; }}
               onMouseLeave={(e) => { e.currentTarget.style.opacity = "1"; }}

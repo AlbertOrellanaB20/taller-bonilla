@@ -15,6 +15,12 @@ import {
   IconUserCog,
   IconSettings,
 } from "@/components/dashboard/icons";
+import { SecretariaDataProvider } from "@/app/secretaria/context";
+import { InventarioDataProvider } from "@/app/inventario/context";
+import { listClientes, listVehiculos } from "@/lib/domain/clientes-vehiculos";
+import { listOrdenesSecretaria, listServiciosCatalogo } from "@/lib/domain/ordenes";
+import { listOrdenesListasParaFacturar, listFacturas } from "@/lib/domain/facturacion";
+import { listRepuestos, listProveedores } from "@/lib/domain/inventario";
 
 const NAV: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: <IconDashboard /> },
@@ -33,6 +39,17 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   const usuario = await getUsuarioActual();
   if (!usuario) redirect("/login");
 
+  const [clients, vehicles, serviceOrders, readyOrders, invoices, catalogo, parts, suppliers] = await Promise.all([
+    listClientes(),
+    listVehiculos(),
+    listOrdenesSecretaria(),
+    listOrdenesListasParaFacturar(),
+    listFacturas(),
+    listServiciosCatalogo(),
+    listRepuestos(),
+    listProveedores(),
+  ]);
+
   return (
     <DashboardShell
       navItems={NAV}
@@ -42,10 +59,21 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       badgeBg="#A31212"
       avatarGradient="linear-gradient(135deg, #A31212 0%, #7a0d0d 100%)"
       sidebarWidth={240}
-      notificationCount={3}
+      notificationCount={readyOrders.length}
       profileHref="/admin/usuarios"
     >
-      {children}
+      <SecretariaDataProvider
+        initialClients={clients}
+        initialVehicles={vehicles}
+        initialServiceOrders={serviceOrders}
+        initialReadyOrders={readyOrders}
+        initialInvoices={invoices}
+        serviceCatalog={catalogo.map((s) => s.name)}
+      >
+        <InventarioDataProvider initialParts={parts} initialSuppliers={suppliers}>
+          {children}
+        </InventarioDataProvider>
+      </SecretariaDataProvider>
     </DashboardShell>
   );
 }

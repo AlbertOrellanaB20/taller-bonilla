@@ -5,6 +5,9 @@ import { getUsuarioActual, initialsFor, firstNameOf } from "@/lib/auth";
 import type { NavItem } from "@/components/dashboard/sidebar";
 import { IconDashboard, IconUsers, IconCarBox, IconClipboard, IconReceipt } from "@/components/dashboard/icons";
 import { SecretariaDataProvider } from "./context";
+import { listClientes, listVehiculos } from "@/lib/domain/clientes-vehiculos";
+import { listOrdenesSecretaria, listServiciosCatalogo } from "@/lib/domain/ordenes";
+import { listOrdenesListasParaFacturar, listFacturas } from "@/lib/domain/facturacion";
 
 const NAV: NavItem[] = [
   { href: "/secretaria", label: "Dashboard", icon: <IconDashboard /> },
@@ -18,6 +21,15 @@ export default async function SecretariaLayout({ children }: { children: ReactNo
   const usuario = await getUsuarioActual();
   if (!usuario) redirect("/login");
 
+  const [clients, vehicles, serviceOrders, readyOrders, invoices, catalogo] = await Promise.all([
+    listClientes(),
+    listVehiculos(),
+    listOrdenesSecretaria(),
+    listOrdenesListasParaFacturar(),
+    listFacturas(),
+    listServiciosCatalogo(),
+  ]);
+
   return (
     <DashboardShell
       navItems={NAV}
@@ -27,9 +39,18 @@ export default async function SecretariaLayout({ children }: { children: ReactNo
       badgeBg="#1d4ed8"
       avatarGradient="linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)"
       sidebarWidth={210}
-      notificationCount={1}
+      notificationCount={readyOrders.length}
     >
-      <SecretariaDataProvider>{children}</SecretariaDataProvider>
+      <SecretariaDataProvider
+        initialClients={clients}
+        initialVehicles={vehicles}
+        initialServiceOrders={serviceOrders}
+        initialReadyOrders={readyOrders}
+        initialInvoices={invoices}
+        serviceCatalog={catalogo.map((s) => s.name)}
+      >
+        {children}
+      </SecretariaDataProvider>
     </DashboardShell>
   );
 }

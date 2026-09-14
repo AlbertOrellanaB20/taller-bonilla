@@ -1,38 +1,20 @@
 "use client";
 
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import Link from "next/link";
+import {
+  listOrdenesSupervisora,
+  reasignarMecanico,
+  cambiarEstadoOrden,
+  type Order,
+} from "@/lib/domain/ordenes";
+import type { Mechanic } from "@/lib/domain/empleados";
+import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
 
-// ── Data ──────────────────────────────────────────────────────────────────────
-// TODO: reemplazar por datos reales de `orden_servicio` (Supabase) cuando se
-// conecte el módulo de órdenes con datos en vivo (Realtime incluido).
-
-export const MECHANICS = ["Noé Arias", "Pedro Salazar", "José Ramírez"];
 const UNASSIGNED = "Sin asignar";
 const STATUSES = ["Pendiente", "En Proceso", "Finalizado", "Entregado"];
 
-export interface Order {
-  id: number;
-  plate: string;
-  model: string;
-  client: string;
-  mechanic: string;
-  status: string;
-  entryDate: string;
-  dueDate: string;
-  overdue: boolean;
-}
-
-const SEED_ORDERS: Order[] = [
-  { id: 1, plate: "ABC-1234", model: "Toyota Corolla", client: "Juan Pérez", mechanic: "Noé Arias", status: "En Proceso", entryDate: "04/09/2026", dueDate: "07/09/2026", overdue: false },
-  { id: 2, plate: "DEF-5678", model: "Ford Ranger", client: "María López", mechanic: UNASSIGNED, status: "Pendiente", entryDate: "06/09/2026", dueDate: "09/09/2026", overdue: false },
-  { id: 3, plate: "GHI-9012", model: "Hyundai Tucson", client: "Roberto Díaz", mechanic: "Pedro Salazar", status: "Finalizado", entryDate: "05/09/2026", dueDate: "07/09/2026", overdue: false },
-  { id: 4, plate: "JKL-3456", model: "Chevrolet Spark", client: "Ana García", mechanic: "Noé Arias", status: "Entregado", entryDate: "03/09/2026", dueDate: "06/09/2026", overdue: false },
-  { id: 5, plate: "MNO-7890", model: "Nissan Sentra", client: "Luis Torres", mechanic: "José Ramírez", status: "En Proceso", entryDate: "04/09/2026", dueDate: "06/09/2026", overdue: true },
-  { id: 6, plate: "PQR-1111", model: "Honda Civic", client: "Carmen Ruiz", mechanic: UNASSIGNED, status: "Pendiente", entryDate: "07/09/2026", dueDate: "10/09/2026", overdue: false },
-  { id: 7, plate: "STU-2222", model: "Mazda 3", client: "Diego Méndez", mechanic: "Pedro Salazar", status: "En Proceso", entryDate: "05/09/2026", dueDate: "08/09/2026", overdue: false },
-  { id: 8, plate: "VWX-3333", model: "Kia Sportage", client: "Paula Moreno", mechanic: "José Ramírez", status: "En Proceso", entryDate: "06/09/2026", dueDate: "09/09/2026", overdue: false },
-];
+export type { Order };
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 
@@ -103,17 +85,17 @@ function StatusSelect({ value, onChange }: { value: string; onChange: (v: string
 
 // ── Mechanic select ───────────────────────────────────────────────────────────
 
-function MechanicSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  const unassigned = value === UNASSIGNED || value === "";
+function MechanicSelect({ value, mechanics, onChange }: { value: number | null; mechanics: Mechanic[]; onChange: (v: number | null) => void }) {
+  const unassigned = value === null;
   return (
     <div style={{ position: "relative", display: "inline-block" }}>
       <select
-        value={value || UNASSIGNED}
-        onChange={(e) => onChange(e.target.value === UNASSIGNED ? UNASSIGNED : e.target.value)}
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
         style={{ background: "transparent", color: unassigned ? "#f59e0b" : "#c0c0c8", border: "none", borderBottom: `1px dashed ${unassigned ? "#f59e0b40" : "#35353a"}`, padding: "2px 20px 2px 0", fontSize: 13, cursor: "pointer", appearance: "none", outline: "none", minWidth: 110 }}
       >
-        <option value={UNASSIGNED}>Sin asignar</option>
-        {MECHANICS.map((m) => <option key={m} value={m}>{m}</option>)}
+        <option value="">Sin asignar</option>
+        {mechanics.map((m) => <option key={m.empleadoId} value={m.empleadoId}>{m.name}</option>)}
       </select>
       <span style={{ position: "absolute", right: 2, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#5a5a65", fontSize: 9 }}>▾</span>
     </div>
@@ -122,9 +104,9 @@ function MechanicSelect({ value, onChange }: { value: string; onChange: (v: stri
 
 // ── Workload chart ────────────────────────────────────────────────────────────
 
-function WorkloadChart({ orders }: { orders: Order[] }) {
+function WorkloadChart({ orders, mechanics }: { orders: Order[]; mechanics: Mechanic[] }) {
   const active = orders.filter((o) => o.status === "En Proceso" || o.status === "Pendiente");
-  const counts = MECHANICS.map((m) => ({ name: m, count: active.filter((o) => o.mechanic === m).length }));
+  const counts = mechanics.map((m) => ({ name: m.name, count: active.filter((o) => o.mechanicId === m.empleadoId).length }));
   const max = Math.max(...counts.map((c) => c.count), 1);
 
   return (
@@ -144,8 +126,8 @@ function WorkloadChart({ orders }: { orders: Order[] }) {
       ))}
       <div style={{ marginTop: 4, padding: "10px 12px", background: "#252529", borderRadius: 8 }}>
         <p style={{ color: "#5a5a65", fontSize: 11, margin: 0 }}>
-          {active.filter((o) => o.mechanic === UNASSIGNED).length > 0
-            ? `⚠ ${active.filter((o) => o.mechanic === UNASSIGNED).length} orden(es) sin asignar`
+          {active.filter((o) => o.mechanicId === null).length > 0
+            ? `⚠ ${active.filter((o) => o.mechanicId === null).length} orden(es) sin asignar`
             : "✓ Todas las órdenes activas tienen mecánico asignado"}
         </p>
       </div>
@@ -155,9 +137,10 @@ function WorkloadChart({ orders }: { orders: Order[] }) {
 
 // ── Orders table ──────────────────────────────────────────────────────────────
 
-function OrdersTable({ orders, onUpdateMechanic, onUpdateStatus }: {
+function OrdersTable({ orders, mechanics, onUpdateMechanic, onUpdateStatus }: {
   orders: Order[];
-  onUpdateMechanic: (id: number, m: string) => void;
+  mechanics: Mechanic[];
+  onUpdateMechanic: (id: number, empleadoId: number | null) => void;
   onUpdateStatus: (id: number, s: string) => void;
 }) {
   const [filterStatus, setFilterStatus] = useState("Todos");
@@ -165,7 +148,7 @@ function OrdersTable({ orders, onUpdateMechanic, onUpdateStatus }: {
 
   const filtered = orders.filter((o) =>
     (filterStatus === "Todos" || o.status === filterStatus) &&
-    (filterMechanic === "Todos" || o.mechanic === filterMechanic || (filterMechanic === UNASSIGNED && (o.mechanic === UNASSIGNED || o.mechanic === "")))
+    (filterMechanic === "Todos" || o.mechanic === filterMechanic || (filterMechanic === UNASSIGNED && o.mechanicId === null))
   );
 
   const selectStyle: React.CSSProperties = { background: "#252529", border: "1px solid #35353a", color: "#c0c0c8", borderRadius: 7, padding: "7px 28px 7px 10px", fontSize: 12, outline: "none", appearance: "none", cursor: "pointer" };
@@ -185,7 +168,7 @@ function OrdersTable({ orders, onUpdateMechanic, onUpdateStatus }: {
           <select style={selectStyle} value={filterMechanic} onChange={(e) => setFilterMechanic(e.target.value)}>
             <option value="Todos">Todos los mecánicos</option>
             <option value={UNASSIGNED}>Sin asignar</option>
-            {MECHANICS.map((m) => <option key={m} value={m}>{m}</option>)}
+            {mechanics.map((m) => <option key={m.empleadoId} value={m.name}>{m.name}</option>)}
           </select>
           <span style={{ position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#5a5a65", fontSize: 9 }}>▾</span>
         </div>
@@ -217,7 +200,7 @@ function OrdersTable({ orders, onUpdateMechanic, onUpdateStatus }: {
                 </td>
                 <td style={{ padding: "12px 14px", borderBottom: "1px solid #1e1e22", color: "#c0c0c8", fontSize: 13 }}>{o.client}</td>
                 <td style={{ padding: "12px 14px", borderBottom: "1px solid #1e1e22" }}>
-                  <MechanicSelect value={o.mechanic} onChange={(m) => onUpdateMechanic(o.id, m)} />
+                  <MechanicSelect value={o.mechanicId} mechanics={mechanics} onChange={(empleadoId) => onUpdateMechanic(o.id, empleadoId)} />
                 </td>
                 <td style={{ padding: "12px 14px", borderBottom: "1px solid #1e1e22" }}>
                   <StatusSelect value={o.status} onChange={(s) => onUpdateStatus(o.id, s)} />
@@ -244,10 +227,13 @@ function OrdersTable({ orders, onUpdateMechanic, onUpdateStatus }: {
 
 interface Props {
   focusTable?: boolean;
+  initialOrders: Order[];
+  mechanics: Mechanic[];
 }
 
-export default function SupervisoraHome({ focusTable }: Props) {
-  const [orders, setOrders] = useState<Order[]>(SEED_ORDERS);
+export default function SupervisoraHome({ focusTable, initialOrders, mechanics }: Props) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [error, setError] = useState<string | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -256,16 +242,35 @@ export default function SupervisoraHome({ focusTable }: Props) {
     }
   }, [focusTable]);
 
+  const refetch = useCallback(async () => {
+    setOrders(await listOrdenesSupervisora());
+  }, []);
+
+  useRealtimeTable(["orden_servicio"], refetch);
+
   const activeCount = orders.filter((o) => o.status === "En Proceso").length;
-  const pendingAssign = orders.filter((o) => o.mechanic === UNASSIGNED && o.status !== "Entregado").length;
-  const mechanicsWork = new Set(orders.filter((o) => o.status === "En Proceso" && o.mechanic !== UNASSIGNED).map((o) => o.mechanic)).size;
+  const pendingAssign = orders.filter((o) => o.mechanicId === null && o.status !== "Entregado").length;
+  const mechanicsWork = new Set(orders.filter((o) => o.status === "En Proceso" && o.mechanicId !== null).map((o) => o.mechanicId)).size;
   const overdueCount = orders.filter((o) => o.overdue && o.status !== "Entregado").length;
 
-  function updateMechanic(id: number, mechanic: string) {
-    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, mechanic } : o)));
+  async function updateMechanic(id: number, empleadoId: number | null) {
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, mechanicId: empleadoId, mechanic: mechanics.find((m) => m.empleadoId === empleadoId)?.name ?? UNASSIGNED } : o)));
+    try {
+      await reasignarMecanico(id, empleadoId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo reasignar el mecánico.");
+      await refetch();
+    }
   }
-  function updateStatus(id: number, status: string) {
+  async function updateStatus(id: number, status: string) {
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+    try {
+      await cambiarEstadoOrden(id, status);
+      await refetch();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo cambiar el estado.");
+      await refetch();
+    }
   }
 
   return (
@@ -310,15 +315,21 @@ export default function SupervisoraHome({ focusTable }: Props) {
         />
       </div>
 
+      {error && (
+        <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "10px 14px", color: "#e87070", fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
       <div className="sv-bottom">
         <div ref={tableRef} className="sv-card">
           <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, margin: "0 0 16px" }}>Órdenes de Servicio</h2>
-          <OrdersTable orders={orders} onUpdateMechanic={updateMechanic} onUpdateStatus={updateStatus} />
+          <OrdersTable orders={orders} mechanics={mechanics} onUpdateMechanic={updateMechanic} onUpdateStatus={updateStatus} />
         </div>
 
         <div className="sv-card">
           <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, margin: "0 0 18px" }}>Carga por mecánico</h2>
-          <WorkloadChart orders={orders} />
+          <WorkloadChart orders={orders} mechanics={mechanics} />
         </div>
       </div>
     </div>

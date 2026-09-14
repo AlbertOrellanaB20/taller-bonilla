@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fmtCLP } from "../lib/data";
+import { fmtUSD as fmtCLP } from "@/lib/format";
 import { useSecretariaData } from "../context";
 
 const PAY_COLOR: Record<string, { bg: string; color: string }> = {

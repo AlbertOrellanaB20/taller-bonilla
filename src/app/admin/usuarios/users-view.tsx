@@ -1,21 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-type Role = "Administrador" | "Supervisora" | "Secretario/a" | "Mecánico" | "Inventario";
-
-interface User {
-  id: number;
-  name: string;
-  email: string;
-  username: string;
-  role: Role;
-  active: boolean;
-  lastLogin: string;
-  specialty?: string;
-}
+import { useState, useEffect, useRef } from "react";
+import {
+  type User,
+  type Role,
+  type UserFormInput,
+  crearUsuario,
+  actualizarUsuario,
+  toggleActivoUsuario,
+} from "@/lib/domain/usuarios";
 
 interface FormState {
   name: string;
@@ -32,18 +25,6 @@ const BLANK_FORM: FormState = {
   name: "", email: "", username: "", password: "", confirmPassword: "",
   role: "Mecánico", specialty: "", active: true,
 };
-
-// ── Datos iniciales ───────────────────────────────────────────────────────────
-// TODO: reemplazar por datos reales de la tabla `usuario` + Supabase Auth Admin
-// API cuando se conecte la gestión real de usuarios (creación/edición real).
-
-const INITIAL_USERS: User[] = [
-  { id: 1, name: "Alberto Orellana", email: "aorellana@tallerbonilla.sv", username: "aorellana", role: "Administrador", active: true, lastLogin: "Hoy, 08:32" },
-  { id: 2, name: "Nahomy Guzmán", email: "nguzman@tallerbonilla.sv", username: "nguzman", role: "Supervisora", active: true, lastLogin: "Hoy, 09:15" },
-  { id: 3, name: "Emely Rodríguez", email: "erodriguez@tallerbonilla.sv", username: "erodriguez", role: "Secretario/a", active: true, lastLogin: "Ayer, 17:45" },
-  { id: 4, name: "Noé Arias", email: "narias@tallerbonilla.sv", username: "narias", role: "Mecánico", active: true, lastLogin: "Hoy, 07:55" },
-  { id: 5, name: "José Luis Rodas", email: "jrodas@tallerbonilla.sv", username: "jrodas", role: "Inventario", active: true, lastLogin: "Hoy, 10:03" },
-];
 
 // ── Role badge ────────────────────────────────────────────────────────────────
 
@@ -136,8 +117,8 @@ function Toast({ toast, onDone }: { toast: ToastData; onDone: () => void }) {
   const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setExiting(true), 2700);
-    const t2 = setTimeout(onDone, 3000);
+    const t1 = setTimeout(() => setExiting(true), 5700);
+    const t2 = setTimeout(onDone, 6000);
     return () => { clearTimeout(t1); clearTimeout(t2); };
   }, [onDone]);
 
@@ -146,7 +127,7 @@ function Toast({ toast, onDone }: { toast: ToastData; onDone: () => void }) {
   return (
     <div
       className={exiting ? "toast-exit" : "toast-enter"}
-      style={{ background: bgColor, color: "#fff", padding: "12px 18px", borderRadius: 10, fontSize: 13, fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", maxWidth: 320, display: "flex", alignItems: "center", gap: 10 }}
+      style={{ background: bgColor, color: "#fff", padding: "12px 18px", borderRadius: 10, fontSize: 13, fontWeight: 500, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", maxWidth: 340, display: "flex", alignItems: "center", gap: 10 }}
     >
       {toast.type === "success" && <span style={{ fontSize: 16 }}>✓</span>}
       {toast.type === "error" && <span style={{ fontSize: 16 }}>✕</span>}
@@ -160,7 +141,7 @@ function Toast({ toast, onDone }: { toast: ToastData; onDone: () => void }) {
 interface ModalProps {
   editing: User | null;
   onClose: () => void;
-  onSave: (form: FormState) => void;
+  onSave: (form: FormState) => Promise<void>;
 }
 
 function UserModal({ editing, onClose, onSave }: ModalProps) {
@@ -172,6 +153,8 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
   const [showPw, setShowPw] = useState(false);
   const [showCpw, setShowCpw] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function set(k: keyof FormState, v: string | boolean) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -183,7 +166,7 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
     if (!form.name.trim()) e.name = "Requerido";
     if (!form.email.includes("@")) e.email = "Correo inválido";
     if (!form.username.trim()) e.username = "Requerido";
-    if (!editing) {
+    if (!editing || form.password) {
       const c = checkPassword(form.password);
       if (!Object.values(c).every(Boolean)) e.password = "La contraseña no cumple los requisitos";
       if (form.password !== form.confirmPassword) e.confirmPassword = "Las contraseñas no coinciden";
@@ -192,10 +175,18 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
     return e;
   }
 
-  function handleSave() {
+  async function handleSave() {
     const e = validate();
     if (Object.keys(e).length > 0) { setErrors(e); return; }
-    onSave(form);
+    setSaveError(null);
+    setSaving(true);
+    try {
+      await onSave(form);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "No se pudo guardar el usuario.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const pwMatch = form.confirmPassword.length > 0 && form.password === form.confirmPassword;
@@ -328,6 +319,12 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
               <div style={{ position: "absolute", top: 2, left: form.active ? 22 : 2, width: 20, height: 20, borderRadius: "50%", background: "#fff", transition: "left 0.2s", boxShadow: "0 1px 4px rgba(0,0,0,0.3)" }} />
             </button>
           </div>
+
+          {saveError && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "10px 14px", color: "#e87070", fontSize: 13 }}>
+              {saveError}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "16px 24px", borderTop: "1px solid #2a2a2e", display: "flex", gap: 10, justifyContent: "flex-end" }}>
@@ -341,11 +338,12 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
           </button>
           <button
             onClick={handleSave}
+            disabled={saving}
             style={{ background: "#A31212", border: "none", borderRadius: 8, padding: "9px 22px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#c01515"; e.currentTarget.style.boxShadow = "0 0 16px rgba(163,18,18,0.4)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#A31212"; e.currentTarget.style.boxShadow = "none"; }}
           >
-            {editing ? "Guardar cambios" : "Crear usuario"}
+            {saving ? "Guardando..." : editing ? "Guardar cambios" : "Crear usuario"}
           </button>
         </div>
       </div>
@@ -355,15 +353,14 @@ function UserModal({ editing, onClose, onSave }: ModalProps) {
 
 // ── UsersView ─────────────────────────────────────────────────────────────────
 
-let nextId = 6;
-
-export default function UsersView() {
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
+export default function UsersView({ initialUsers }: { initialUsers: User[] }) {
+  const [users, setUsers] = useState<User[]>(initialUsers);
   const [modal, setModal] = useState<"new" | User | null>(null);
   const [toasts, setToasts] = useState<ToastData[]>([]);
+  const nextToastId = useRef(0);
 
   function addToast(message: string, type: ToastData["type"] = "success") {
-    const id = Date.now();
+    const id = nextToastId.current++;
     setToasts((t) => [...t, { id, message, type }]);
   }
 
@@ -371,30 +368,46 @@ export default function UsersView() {
     setToasts((t) => t.filter((x) => x.id !== id));
   }
 
-  function handleSave(form: FormState) {
+  async function handleSave(form: FormState) {
     const editing = typeof modal === "object" && modal !== null ? modal : null;
+    const input: UserFormInput = {
+      name: form.name,
+      email: form.email,
+      username: form.username,
+      password: form.password,
+      role: form.role,
+      specialty: form.specialty,
+      active: form.active,
+    };
+
     if (editing) {
-      setUsers((u) => u.map((user) => (user.id === editing.id ? { ...user, ...form, id: user.id, lastLogin: user.lastLogin } : user)));
-      addToast(`Usuario "${form.username}" actualizado correctamente.`);
+      const updated = await actualizarUsuario(editing.id, editing.authUserId, input);
+      setUsers((u) => u.map((user) => (user.id === updated.id ? updated : user)));
+      addToast(`Usuario "${updated.username}" actualizado correctamente.`);
     } else {
-      const newUser: User = { id: nextId++, name: form.name, email: form.email, username: form.username, role: form.role, active: form.active, lastLogin: "Nunca", specialty: form.specialty || undefined };
-      setUsers((u) => [...u, newUser]);
-      addToast(`Usuario "${form.username}" creado exitosamente.`);
+      const created = await crearUsuario(input);
+      setUsers((u) => [...u, created]);
+      addToast(`Usuario "${created.username}" creado exitosamente.`);
     }
     setModal(null);
   }
 
-  function toggleActive(id: number) {
-    setUsers((u) => u.map((user) => {
-      if (user.id !== id) return user;
-      const next = !user.active;
+  async function toggleActive(user: User) {
+    const next = !user.active;
+    setUsers((u) => u.map((x) => (x.id === user.id ? { ...x, active: next } : x)));
+    try {
+      await toggleActivoUsuario(user.id, next);
       addToast(`Usuario "${user.username}" ${next ? "activado" : "desactivado"}.`, next ? "success" : "info");
-      return { ...user, active: next };
-    }));
+    } catch (e) {
+      setUsers((u) => u.map((x) => (x.id === user.id ? { ...x, active: !next } : x)));
+      addToast(e instanceof Error ? e.message : "No se pudo cambiar el estado del usuario.", "error");
+    }
   }
 
   function resetPassword(user: User) {
-    addToast(`Se envió enlace de restablecimiento a ${user.email}.`, "info");
+    // Abre el mismo formulario de edición: el Admin escribe la contraseña
+    // nueva ahí (con el medidor de fortaleza) en vez de recibir una al azar.
+    setModal(user);
   }
 
   return (
@@ -436,7 +449,6 @@ export default function UsersView() {
                 <th>Correo</th>
                 <th>Rol</th>
                 <th>Estado</th>
-                <th>Última conexión</th>
                 <th>Acciones</th>
               </tr>
             </thead>
@@ -461,14 +473,13 @@ export default function UsersView() {
                       <span style={{ color: user.active ? "#4ade80" : "#f87171", fontSize: 12, fontWeight: 500 }}>{user.active ? "Activo" : "Inactivo"}</span>
                     </span>
                   </td>
-                  <td style={{ color: "#6a6a76", fontSize: 12 }}>{user.lastLogin}</td>
                   <td>
                     <div style={{ display: "flex", gap: 6, flexWrap: "nowrap" }}>
                       <button className="action-btn" onClick={() => setModal(user)}>Editar</button>
-                      <button className={`action-btn ${user.active ? "deactivate" : "activate"}`} onClick={() => toggleActive(user.id)}>
+                      <button className={`action-btn ${user.active ? "deactivate" : "activate"}`} onClick={() => toggleActive(user)}>
                         {user.active ? "Desactivar" : "Activar"}
                       </button>
-                      <button className="action-btn" onClick={() => resetPassword(user)}>Restablecer pw</button>
+                      <button className="action-btn" onClick={() => resetPassword(user)}>Cambiar contraseña</button>
                     </div>
                   </td>
                 </tr>

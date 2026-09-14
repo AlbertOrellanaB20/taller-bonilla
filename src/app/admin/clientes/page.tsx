@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+import ClientesView from "@/app/secretaria/clientes/clientes-view";
 
-export default function ClientesPage() {
-  return <ComingSoon label="Clientes" />;
+export default function AdminClientesPage() {
+  return <ClientesView />;
 }

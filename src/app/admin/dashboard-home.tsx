@@ -2,12 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-
-function fmt(n: number) {
-  return `$${Math.round(n).toLocaleString("es-CL")}`;
-}
+import type { AdminDashboardStats } from "@/lib/domain/reportes";
+import { fmtUSD as fmt } from "@/lib/format";
 
 function useCountUp(target: number, duration = 1400) {
   const [current, setCurrent] = useState(0);
@@ -24,43 +20,6 @@ function useCountUp(target: number, duration = 1400) {
   }, [target, duration]);
   return current;
 }
-
-// ── Mock data ─────────────────────────────────────────────────────────────────
-// TODO: reemplazar por datos reales de Supabase (órdenes, facturas, inventario)
-// cuando se conecten los módulos correspondientes.
-
-const revenueData = [
-  { label: "Lun", value: 380000 },
-  { label: "Mar", value: 520000 },
-  { label: "Mié", value: 310000 },
-  { label: "Jue", value: 680000 },
-  { label: "Vie", value: 750000 },
-  { label: "Sáb", value: 420000 },
-  { label: "Dom", value: 185000 },
-];
-
-const topServices = [
-  { name: "Cambio de aceite", count: 47 },
-  { name: "Frenos y pastillas", count: 31 },
-  { name: "Aire acondicionado", count: 28 },
-  { name: "Alineación y balanceo", count: 22 },
-  { name: "Diagnóstico electrónico", count: 19 },
-];
-
-const recentOrders = [
-  { plate: "ABC-1234", model: "Toyota Corolla", client: "Juan Pérez", mechanic: "Carlos M.", status: "En Proceso", date: "06/09/2026" },
-  { plate: "DEF-5678", model: "Ford Ranger", client: "María López", mechanic: "Pedro S.", status: "Pendiente", date: "06/09/2026" },
-  { plate: "GHI-9012", model: "Hyundai Tucson", client: "Roberto Díaz", mechanic: "Miguel T.", status: "Finalizado", date: "05/09/2026" },
-  { plate: "JKL-3456", model: "Chevrolet Spark", client: "Ana García", mechanic: "Carlos M.", status: "Entregado", date: "05/09/2026" },
-  { plate: "MNO-7890", model: "Nissan Sentra", client: "Luis Torres", mechanic: "José R.", status: "En Proceso", date: "04/09/2026" },
-];
-
-const lowStock = [
-  { name: "Filtro de aceite", current: 3, min: 10, unit: "uds" },
-  { name: "Pastillas de freno", current: 2, min: 8, unit: "uds" },
-  { name: "Refrigerante", current: 1, min: 5, unit: "lts" },
-  { name: "Bujías NGK", current: 4, min: 12, unit: "uds" },
-];
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -122,14 +81,14 @@ function KpiCard({ label, value, format, delta, positive, icon, cls }: KpiProps)
 
 // ── Bar chart ─────────────────────────────────────────────────────────────────
 
-function RevenueChart() {
+function RevenueChart({ data }: { data: { label: string; value: number }[] }) {
   const [hovered, setHovered] = useState<number | null>(null);
-  const max = Math.max(...revenueData.map((d) => d.value));
+  const max = Math.max(...data.map((d) => d.value), 1);
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 140 }}>
-        {revenueData.map((d, i) => (
+        {data.map((d, i) => (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 4 }}>
             {hovered === i && (
               <span style={{ fontSize: 10, fontWeight: 600, color: "#f0f0f2", whiteSpace: "nowrap", background: "#2a2a2e", padding: "2px 6px", borderRadius: 4 }}>
@@ -153,7 +112,7 @@ function RevenueChart() {
         ))}
       </div>
       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-        {revenueData.map((d, i) => (
+        {data.map((d, i) => (
           <div key={i} style={{ flex: 1, textAlign: "center" }}>
             <span style={{ fontSize: 11, color: hovered === i ? "#f0f0f2" : "#5a5a65", transition: "color 0.2s" }}>{d.label}</span>
           </div>
@@ -165,11 +124,12 @@ function RevenueChart() {
 
 // ── Top services ──────────────────────────────────────────────────────────────
 
-function TopServices() {
-  const max = topServices[0].count;
+function TopServices({ data }: { data: { name: string; count: number }[] }) {
+  const max = data[0]?.count ?? 1;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {topServices.map((s, i) => (
+      {data.length === 0 && <div style={{ color: "#5a5a65", fontSize: 13, textAlign: "center", padding: "12px 0" }}>Sin servicios registrados este mes.</div>}
+      {data.map((s, i) => (
         <div key={i}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
             <span style={{ color: "#c0c0c8", fontSize: 13 }}>{s.name}</span>
@@ -186,7 +146,7 @@ function TopServices() {
 
 // ── DashboardHome ─────────────────────────────────────────────────────────────
 
-export default function DashboardHome() {
+export default function DashboardHome({ stats }: { stats: AdminDashboardStats }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 1400 }}>
       <style>{`
@@ -229,16 +189,16 @@ export default function DashboardHome() {
 
       {/* KPI cards */}
       <div className="kpi-grid">
-        <KpiCard cls="kpi-1" label="Ingresos del mes" value={2847500} format={fmt} delta="18.4%" positive={true}
+        <KpiCard cls="kpi-1" label="Ingresos del mes" value={stats.ingresosDelMes} format={fmt} delta="facturas pagadas" positive={true}
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>}
         />
-        <KpiCard cls="kpi-2" label="Órdenes activas" value={23} delta="12%" positive={true}
+        <KpiCard cls="kpi-2" label="Órdenes activas" value={stats.ordenesActivas} delta="pendientes o en proceso" positive={true}
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect x="8" y="2" width="8" height="4" rx="1" /></svg>}
         />
-        <KpiCard cls="kpi-3" label="Vehículos en taller" value={18} delta="5%" positive={true}
+        <KpiCard cls="kpi-3" label="Vehículos en taller" value={stats.vehiculosEnTaller} delta="con orden activa" positive={true}
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 17H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h2l2-4h8l2 4h2a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-2" /><circle cx="7" cy="17" r="2" /><circle cx="17" cy="17" r="2" /></svg>}
         />
-        <KpiCard cls="kpi-4" label="Stock bajo" value={7} delta="3 items" positive={false}
+        <KpiCard cls="kpi-4" label="Stock bajo" value={stats.stockBajo} delta="repuestos" positive={stats.stockBajo === 0}
           icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>}
         />
       </div>
@@ -247,11 +207,11 @@ export default function DashboardHome() {
       <div className="charts-row">
         <div className="card">
           <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, marginBottom: 18 }}>Ingresos — últimos 7 días</h2>
-          <RevenueChart />
+          <RevenueChart data={stats.ingresosUltimos7Dias} />
         </div>
         <div className="card">
           <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, marginBottom: 18 }}>Servicios más solicitados</h2>
-          <TopServices />
+          <TopServices data={stats.serviciosTopMes} />
         </div>
       </div>
 
@@ -277,7 +237,10 @@ export default function DashboardHome() {
                 </tr>
               </thead>
               <tbody>
-                {recentOrders.map((o, i) => (
+                {stats.ordenesRecientes.length === 0 && (
+                  <tr><td colSpan={5} style={{ textAlign: "center", padding: 24, color: "#5a5a65" }}>Todavía no hay órdenes registradas.</td></tr>
+                )}
+                {stats.ordenesRecientes.map((o, i) => (
                   <tr key={i}>
                     <td>
                       <div style={{ fontWeight: 600, color: "#f0f0f2", fontSize: 12 }}>{o.plate}</div>
@@ -301,15 +264,18 @@ export default function DashboardHome() {
             <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, margin: 0 }}>Alertas de inventario</h2>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {lowStock.map((item, i) => {
-              const pct = Math.min((item.current / item.min) * 100, 100);
+            {stats.alertasInventario.length === 0 && (
+              <div style={{ textAlign: "center", padding: "12px 0", color: "#5a5a65", fontSize: 13 }}>✓ Todo el inventario está en niveles adecuados.</div>
+            )}
+            {stats.alertasInventario.map((item, i) => {
+              const pct = Math.min((item.current / Math.max(item.min, 1)) * 100, 100);
               const barColor = pct < 30 ? "#ef4444" : pct < 60 ? "#f59e0b" : "#22c55e";
               return (
                 <div key={i}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 5 }}>
                     <span style={{ color: "#c0c0c8", fontSize: 13 }}>{item.name}</span>
                     <span style={{ color: "#f87171", fontSize: 12, fontWeight: 600 }}>
-                      {item.current}/{item.min} {item.unit}
+                      {item.current}/{item.min} uds
                     </span>
                   </div>
                   <div style={{ height: 4, background: "#252529", borderRadius: 3, overflow: "hidden" }}>

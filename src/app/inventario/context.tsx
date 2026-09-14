@@ -1,7 +1,15 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
-import { type Part, type Supplier, type StockLog, SEED_PARTS, SEED_SUPPLIERS } from "./lib/data";
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import {
+  type Part,
+  type Supplier,
+  listRepuestos,
+  crearRepuesto,
+  crearProveedor,
+  ajustarStock,
+} from "@/lib/domain/inventario";
+import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
 
 interface InventarioDataValue {
   parts: Part[];
@@ -20,40 +28,48 @@ export function useInventarioData(): InventarioDataValue {
   return ctx;
 }
 
-let _nextPartId = SEED_PARTS.length + 1;
-let _nextSupId = SEED_SUPPLIERS.length + 1;
-
 function stockStatusLocal(p: Part) {
   if (p.stock <= 0) return "critical";
   if (p.stock < p.minStock) return p.stock <= Math.ceil(p.minStock * 0.4) ? "critical" : "low";
   return "ok";
 }
 
-export function InventarioDataProvider({ children }: { children: ReactNode }) {
-  const [parts, setParts] = useState<Part[]>(SEED_PARTS);
-  const [suppliers, setSuppliers] = useState<Supplier[]>(SEED_SUPPLIERS);
+export function InventarioDataProvider({
+  children,
+  initialParts,
+  initialSuppliers,
+}: {
+  children: ReactNode;
+  initialParts: Part[];
+  initialSuppliers: Supplier[];
+}) {
+  const [parts, setParts] = useState<Part[]>(initialParts);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(initialSuppliers);
   const [adjustId, setAdjustId] = useState<number | null>(null);
   const [showNewPart, setShowNewPart] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
-  const [, setLogs] = useState<StockLog[]>([]);
 
   const criticalCount = parts.filter((p) => stockStatusLocal(p) === "critical").length;
 
-  function handleAdjust(partId: number, type: "entrada" | "salida", qty: number, reason: string) {
-    setParts((prev) => prev.map((p) => {
-      if (p.id !== partId) return p;
-      const delta = type === "entrada" ? qty : -qty;
-      return { ...p, stock: Math.max(0, p.stock + delta) };
-    }));
-    setLogs((prev) => [{ partId, type, qty, reason, date: "07/09/2026" }, ...prev]);
+  const refetchParts = useCallback(async () => {
+    setParts(await listRepuestos());
+  }, []);
+
+  useRealtimeTable(["repuesto"], refetchParts);
+
+  async function handleAdjust(partId: number, type: "entrada" | "salida", qty: number, reason: string) {
+    const updated = await ajustarStock(partId, type, qty, reason);
+    setParts((prev) => prev.map((p) => (p.id === partId ? updated : p)));
   }
 
-  function handleAddPart(data: Omit<Part, "id">) {
-    setParts((prev) => [...prev, { id: _nextPartId++, ...data }]);
+  async function handleAddPart(data: Omit<Part, "id">) {
+    const created = await crearRepuesto(data);
+    setParts((prev) => [...prev, created]);
   }
 
-  function handleAddSupplier(name: string, phone: string) {
-    setSuppliers((prev) => [...prev, { id: _nextSupId++, name, phone }]);
+  async function handleAddSupplier(name: string, phone: string) {
+    const created = await crearProveedor(name, phone);
+    setSuppliers((prev) => [...prev, created]);
   }
 
   const adjustPart = parts.find((p) => p.id === adjustId) ?? null;
@@ -86,19 +102,29 @@ function StockModal({ part, suppliers, onClose, onSave }: {
   part: Part;
   suppliers: Supplier[];
   onClose: () => void;
-  onSave: (partId: number, type: "entrada" | "salida", qty: number, reason: string) => void;
+  onSave: (partId: number, type: "entrada" | "salida", qty: number, reason: string) => Promise<void>;
 }) {
   const [type, setType] = useState<"entrada" | "salida">("entrada");
   const [qty, setQty] = useState(1);
   const [reason, setReason] = useState("");
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const sup = suppliers.find((s) => s.id === part.supplierId);
 
-  function handleSave() {
+  async function handleSave() {
     if (qty < 1 || !reason.trim()) return;
-    onSave(part.id, type, qty, reason.trim());
-    setDone(true);
-    setTimeout(() => { setDone(false); onClose(); }, 1600);
+    setError(null);
+    setSaving(true);
+    try {
+      await onSave(part.id, type, qty, reason.trim());
+      setDone(true);
+      setTimeout(() => { setDone(false); onClose(); }, 1600);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo registrar el movimiento.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -169,15 +195,21 @@ function StockModal({ part, suppliers, onClose, onSave }: {
             <input type="text" placeholder={type === "entrada" ? "Ej: Compra a proveedor, reposición..." : "Ej: Uso en orden ORD-0003, pieza dañada..."}
               value={reason} onChange={(e) => setReason(e.target.value)} className="db-input" />
           </div>
+
+          {error && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
+              {error}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "14px 22px 22px", display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "transparent", border: "1px solid #35353a", borderRadius: 8, padding: "9px 18px", color: "#8a8a96", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={handleSave} disabled={qty < 1 || !reason.trim()}
+          <button onClick={handleSave} disabled={qty < 1 || !reason.trim() || saving}
             style={{ background: qty >= 1 && reason.trim() ? (type === "entrada" ? "#166534" : "#991b1b") : "#35353a", border: "none", borderRadius: 8, padding: "9px 22px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: qty >= 1 && reason.trim() ? "pointer" : "not-allowed", opacity: qty >= 1 && reason.trim() ? 1 : 0.45, transition: "all .2s" }}
             onMouseEnter={(e) => { if (qty >= 1 && reason.trim()) e.currentTarget.style.filter = "brightness(1.15)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.filter = "none"; }}>
-            Registrar movimiento
+            {saving ? "Guardando..." : "Registrar movimiento"}
           </button>
         </div>
       </div>
@@ -192,17 +224,27 @@ const BLANK_PART = { code: "", name: "", supplierId: 0, stock: 0, minStock: 0, p
 function NewPartModal({ suppliers, onClose, onSave }: {
   suppliers: Supplier[];
   onClose: () => void;
-  onSave: (p: Omit<Part, "id">) => void;
+  onSave: (p: Omit<Part, "id">) => Promise<void>;
 }) {
   const [form, setForm] = useState({ ...BLANK_PART, supplierId: suppliers[0]?.id ?? 0 });
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const valid = form.code.trim() && form.name.trim() && form.supplierId > 0;
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    onSave({ ...form });
-    setDone(true);
-    setTimeout(() => { setDone(false); onClose(); }, 1600);
+    setError(null);
+    setSaving(true);
+    try {
+      await onSave({ ...form });
+      setDone(true);
+      setTimeout(() => { setDone(false); onClose(); }, 1600);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el repuesto.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const label = (t: string) => <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase" as const, letterSpacing: "0.06em" }}>{t}</label>;
@@ -265,18 +307,24 @@ function NewPartModal({ suppliers, onClose, onSave }: {
             </div>
             <div>
               {label("Precio unit. ($)")}
-              <input type="number" min={0} className="db-input" placeholder="0" value={form.price || ""} onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))} />
+              <input type="number" min={0} step="0.01" className="db-input" placeholder="0.00" value={form.price || ""} onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))} />
             </div>
           </div>
+
+          {error && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
+              {error}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "14px 22px 22px", display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "transparent", border: "1px solid #35353a", borderRadius: 8, padding: "9px 18px", color: "#8a8a96", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={handleSave} disabled={!valid}
+          <button onClick={handleSave} disabled={!valid || saving}
             style={{ background: valid ? "#7c3aed" : "#35353a", border: "none", borderRadius: 8, padding: "9px 22px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: valid ? "pointer" : "not-allowed", opacity: valid ? 1 : 0.45, transition: "all .2s" }}
             onMouseEnter={(e) => { if (valid) e.currentTarget.style.background = "#6d28d9"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = valid ? "#7c3aed" : "#35353a"; }}>
-            Guardar repuesto
+            {saving ? "Guardando..." : "Guardar repuesto"}
           </button>
         </div>
       </div>
@@ -286,17 +334,27 @@ function NewPartModal({ suppliers, onClose, onSave }: {
 
 // ── New Supplier Modal ────────────────────────────────────────────────────────
 
-function NewSupplierModal({ onClose, onSave }: { onClose: () => void; onSave: (name: string, phone: string) => void }) {
+function NewSupplierModal({ onClose, onSave }: { onClose: () => void; onSave: (name: string, phone: string) => Promise<void> }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const valid = name.trim();
 
-  function handleSave() {
+  async function handleSave() {
     if (!valid) return;
-    onSave(name.trim(), phone.trim());
-    setDone(true);
-    setTimeout(() => { setDone(false); onClose(); }, 1600);
+    setError(null);
+    setSaving(true);
+    try {
+      await onSave(name.trim(), phone.trim());
+      setDone(true);
+      setTimeout(() => { setDone(false); onClose(); }, 1600);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el proveedor.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -332,15 +390,21 @@ function NewSupplierModal({ onClose, onSave }: { onClose: () => void; onSave: (n
             <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Teléfono</label>
             <input className="db-input" placeholder="Ej: 2234-5678" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
+
+          {error && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
+              {error}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "14px 22px 22px", display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "transparent", border: "1px solid #35353a", borderRadius: 8, padding: "9px 18px", color: "#8a8a96", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={handleSave} disabled={!valid}
+          <button onClick={handleSave} disabled={!valid || saving}
             style={{ background: valid ? "#7c3aed" : "#35353a", border: "none", borderRadius: 8, padding: "9px 22px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: valid ? "pointer" : "not-allowed", opacity: valid ? 1 : 0.45, transition: "all .2s" }}
             onMouseEnter={(e) => { if (valid) e.currentTarget.style.background = "#6d28d9"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = valid ? "#7c3aed" : "#35353a"; }}>
-            Guardar proveedor
+            {saving ? "Guardando..." : "Guardar proveedor"}
           </button>
         </div>
       </div>

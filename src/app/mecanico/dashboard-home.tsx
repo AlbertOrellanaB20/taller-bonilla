@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { OrderCard } from "./order-card";
 import { useMecanicoData } from "./context";
-import { TODAY_ORDERS } from "./lib/data";
+import { todayDMY } from "@/lib/format";
 
 function useCountUp(target: number, dur = 1100) {
   const [v, setV] = useState(0);
@@ -24,7 +24,7 @@ const IcoCar = () => <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
 export default function DashboardHome() {
   const { orders, advanceStatus, openDetail } = useMecanicoData();
 
-  const assignedToday = TODAY_ORDERS.length;
+  const assignedToday = orders.filter((o) => o.receivedDate === todayDMY()).length;
   const inProcess = orders.filter((o) => o.status === "En Proceso").length;
   const completedWeek = orders.filter((o) => o.status === "Finalizado").length;
   const activeOrders = orders.filter((o) => o.status !== "Finalizado");

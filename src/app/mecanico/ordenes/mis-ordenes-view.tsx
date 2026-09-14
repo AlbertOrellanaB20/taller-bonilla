@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { OrderCard } from "../order-card";
 import { useMecanicoData } from "../context";
-import type { OrderStatus } from "../lib/data";
+import type { OrderStatus } from "@/lib/domain/ordenes";
 
 export default function MisOrdenesView() {
   const { orders, advanceStatus, openDetail } = useMecanicoData();
