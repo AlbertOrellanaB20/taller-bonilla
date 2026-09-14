@@ -1,7 +1,8 @@
 "use client";
 
 import { IconCheck } from "@/components/dashboard/icons";
-import { type MechanicOrder, STATUS_STYLE, NEXT_STATUS, BTN_LABEL } from "./lib/data";
+import type { MechanicOrder } from "@/lib/domain/ordenes";
+import { STATUS_STYLE, NEXT_STATUS, BTN_LABEL } from "./lib/data";
 
 export function OrderCard({ order, onAdvance, onOpenDetail }: { order: MechanicOrder; onAdvance: (id: number) => void; onOpenDetail: (id: number) => void }) {
   const st = STATUS_STYLE[order.status];

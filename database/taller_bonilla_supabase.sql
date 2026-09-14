@@ -295,3 +295,248 @@ ALTER PUBLICATION supabase_realtime ADD TABLE detalle_servicio;
 ALTER PUBLICATION supabase_realtime ADD TABLE detalle_repuesto;
 ALTER PUBLICATION supabase_realtime ADD TABLE factura;
 ALTER PUBLICATION supabase_realtime ADD TABLE repuesto;
+
+-- =====================================================================
+-- 10. INTEGRACIÓN COMPLETA — cada módulo conectado a datos reales
+-- Pegar esta sección completa en el SQL Editor de Supabase. Es segura de
+-- correr sobre una base que ya tiene las secciones 1-9 de este script.
+-- =====================================================================
+
+-- 10.1 Columna nueva: checklist de servicios por el Mecánico (el diseño de
+-- Figma ya la usa — "servicesDone" — pero la tabla original no la tenía).
+ALTER TABLE detalle_servicio ADD COLUMN IF NOT EXISTS completado BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- 10.2 Numeración automática de facturas (FAC-0001, FAC-0002, ...). Con esto
+-- el número de factura ya no se calcula en el frontend: Postgres lo asigna
+-- solo, de forma segura aunque dos personas facturen al mismo tiempo.
+CREATE SEQUENCE IF NOT EXISTS factura_numero_seq START 1;
+ALTER TABLE factura ALTER COLUMN numero_factura SET DEFAULT ('FAC-' || lpad(nextval('factura_numero_seq')::text, 4, '0'));
+
+-- 10.3 Función helper: id_empleado del usuario autenticado actual (o NULL si
+-- no es empleado). La usan las políticas de RLS de abajo para que un
+-- Mecánico solo pueda ver/tocar SUS propias órdenes asignadas.
+CREATE OR REPLACE FUNCTION fn_empleado_actual()
+RETURNS INT AS $$
+    SELECT e.id_empleado FROM empleado e
+    JOIN usuario u ON u.id_usuario = e.id_usuario
+    WHERE u.auth_user_id = auth.uid()
+$$ LANGUAGE sql STABLE;
+
+-- 10.4 Las funciones que descuentan stock y recalculan el total de la orden
+-- se marcan SECURITY DEFINER: así, cuando un Mecánico agrega un repuesto a
+-- SU orden, el trigger puede actualizar `repuesto.stock_actual` y
+-- `orden_servicio.total` aunque el Mecánico no tenga permiso directo de
+-- escritura en esas tablas (evita que el descuento de stock se bloquee por
+-- RLS, sin abrir esas tablas por completo a cualquier rol).
+CREATE OR REPLACE FUNCTION fn_actualizar_total_orden(p_id_orden INT)
+RETURNS void AS $$
+BEGIN
+    UPDATE orden_servicio
+       SET total = (SELECT COALESCE(SUM(precio_aplicado), 0) FROM detalle_servicio WHERE id_orden_servicio = p_id_orden)
+                  + (SELECT COALESCE(SUM(subtotal), 0) FROM detalle_repuesto WHERE id_orden_servicio = p_id_orden)
+     WHERE id_orden_servicio = p_id_orden;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION trg_detalle_repuesto_insert()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (SELECT stock_actual FROM repuesto WHERE id_repuesto = NEW.id_repuesto) < NEW.cantidad THEN
+        RAISE EXCEPTION 'No hay suficiente stock de este repuesto (quedan %)', (SELECT stock_actual FROM repuesto WHERE id_repuesto = NEW.id_repuesto);
+    END IF;
+    UPDATE repuesto SET stock_actual = stock_actual - NEW.cantidad WHERE id_repuesto = NEW.id_repuesto;
+    PERFORM fn_actualizar_total_orden(NEW.id_orden_servicio);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION trg_detalle_repuesto_delete()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE repuesto SET stock_actual = stock_actual + OLD.cantidad WHERE id_repuesto = OLD.id_repuesto;
+    PERFORM fn_actualizar_total_orden(OLD.id_orden_servicio);
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+CREATE OR REPLACE FUNCTION trg_detalle_servicio_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        PERFORM fn_actualizar_total_orden(OLD.id_orden_servicio);
+        RETURN OLD;
+    ELSE
+        PERFORM fn_actualizar_total_orden(NEW.id_orden_servicio);
+        RETURN NEW;
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- 10.5 Generar factura: operación transaccional. Crea la factura Y marca la
+-- orden como "Entregado" en un solo paso — si algo falla a la mitad, Postgres
+-- deshace todo (no queda una factura huérfana ni una orden a medio actualizar).
+CREATE OR REPLACE FUNCTION fn_generar_factura(p_id_orden INT, p_id_metodo_pago INT)
+RETURNS INT AS $$
+DECLARE
+    v_subtotal DECIMAL(10,2);
+    v_iva DECIMAL(10,2);
+    v_id_factura INT;
+    v_id_estado_actual INT;
+    v_id_estado_finalizado INT;
+    v_id_estado_entregado INT;
+BEGIN
+    IF fn_rol_actual() NOT IN ('Administrador', 'Secretario/a') THEN
+        RAISE EXCEPTION 'No autorizado para generar facturas';
+    END IF;
+
+    SELECT id_estado_orden, total INTO v_id_estado_actual, v_subtotal
+    FROM orden_servicio WHERE id_orden_servicio = p_id_orden FOR UPDATE;
+
+    IF v_id_estado_actual IS NULL THEN
+        RAISE EXCEPTION 'La orden % no existe', p_id_orden;
+    END IF;
+
+    SELECT id_estado_orden INTO v_id_estado_finalizado FROM estado_orden WHERE nombre_estado = 'Finalizado';
+    SELECT id_estado_orden INTO v_id_estado_entregado FROM estado_orden WHERE nombre_estado = 'Entregado';
+
+    IF v_id_estado_actual != v_id_estado_finalizado THEN
+        RAISE EXCEPTION 'Solo se puede facturar una orden en estado Finalizado';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM factura WHERE id_orden_servicio = p_id_orden) THEN
+        RAISE EXCEPTION 'Esta orden ya tiene una factura generada';
+    END IF;
+
+    v_iva := ROUND(v_subtotal * 0.13, 2);
+
+    INSERT INTO factura (id_orden_servicio, id_estado_factura, id_metodo_pago, subtotal, iva)
+    VALUES (p_id_orden, (SELECT id_estado_factura FROM estado_factura WHERE nombre_estado = 'Pendiente'), p_id_metodo_pago, v_subtotal, v_iva)
+    RETURNING id_factura INTO v_id_factura;
+
+    UPDATE orden_servicio SET id_estado_orden = v_id_estado_entregado, fecha_entrega_real = now()
+    WHERE id_orden_servicio = p_id_orden;
+
+    RETURN v_id_factura;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- 10.6 RLS completa: las tablas que faltaban (estaban abiertas a cualquier
+-- usuario autenticado sin ninguna política — CLAUDE.md exige RLS en TODAS).
+
+ALTER TABLE empleado ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "empleado_admin_control_total" ON empleado
+FOR ALL USING (fn_rol_actual() = 'Administrador') WITH CHECK (fn_rol_actual() = 'Administrador');
+CREATE POLICY "empleado_supervisora_lectura" ON empleado
+FOR SELECT USING (fn_rol_actual() = 'Supervisora');
+CREATE POLICY "empleado_lee_su_propia_fila" ON empleado
+FOR SELECT USING (id_usuario = (SELECT id_usuario FROM usuario WHERE auth_user_id = auth.uid()));
+
+CREATE POLICY "usuario_lectura_supervisora" ON usuario
+FOR SELECT USING (fn_rol_actual() = 'Supervisora');
+
+ALTER TABLE cliente ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "cliente_admin_secretaria_control_total" ON cliente
+FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+CREATE POLICY "cliente_lectura_relacionada" ON cliente
+FOR SELECT USING (
+    fn_rol_actual() = 'Supervisora'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM vehiculo v JOIN orden_servicio os ON os.id_vehiculo = v.id_vehiculo
+        WHERE v.id_cliente = cliente.id_cliente AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+
+ALTER TABLE vehiculo ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "vehiculo_admin_secretaria_control_total" ON vehiculo
+FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+CREATE POLICY "vehiculo_lectura_relacionada" ON vehiculo
+FOR SELECT USING (
+    fn_rol_actual() = 'Supervisora'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_vehiculo = vehiculo.id_vehiculo AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+
+-- orden_servicio tenía RLS activado desde la sección 8 pero SIN ninguna
+-- política — eso la dejaba inaccesible para todo el mundo. Estas son las
+-- políticas reales según la tabla de permisos de CLAUDE.md.
+CREATE POLICY "orden_servicio_lectura" ON orden_servicio
+FOR SELECT USING (
+    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
+    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
+);
+CREATE POLICY "orden_servicio_creacion" ON orden_servicio
+FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+CREATE POLICY "orden_servicio_actualizacion" ON orden_servicio
+FOR UPDATE USING (
+    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
+    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
+) WITH CHECK (
+    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
+    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
+);
+
+ALTER TABLE detalle_servicio ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "detalle_servicio_lectura" ON detalle_servicio
+FOR SELECT USING (
+    fn_rol_actual() IN ('Administrador', 'Secretario/a', 'Supervisora')
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+CREATE POLICY "detalle_servicio_creacion" ON detalle_servicio
+FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+CREATE POLICY "detalle_servicio_borra" ON detalle_servicio
+FOR DELETE USING (fn_rol_actual() = 'Administrador');
+CREATE POLICY "detalle_servicio_mecanico_marca_completado" ON detalle_servicio
+FOR UPDATE USING (
+    fn_rol_actual() = 'Administrador'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+) WITH CHECK (
+    fn_rol_actual() = 'Administrador'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+
+ALTER TABLE proveedor ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "proveedor_admin_inventario_control_total" ON proveedor
+FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Inventario')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Inventario'));
+
+ALTER TABLE repuesto ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "repuesto_admin_inventario_control_total" ON repuesto
+FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Inventario')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Inventario'));
+CREATE POLICY "repuesto_lectura_mecanico" ON repuesto
+FOR SELECT USING (fn_rol_actual() = 'Mecánico');
+
+ALTER TABLE detalle_repuesto ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "detalle_repuesto_lectura" ON detalle_repuesto
+FOR SELECT USING (
+    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a', 'Inventario')
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+CREATE POLICY "detalle_repuesto_escribe" ON detalle_repuesto
+FOR INSERT WITH CHECK (
+    fn_rol_actual() = 'Administrador'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+CREATE POLICY "detalle_repuesto_borra" ON detalle_repuesto
+FOR DELETE USING (
+    fn_rol_actual() = 'Administrador'
+    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
+        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
+    ))
+);
+
+-- factura tenía RLS activado y solo una política de lectura — le faltaban
+-- las de creación/actualización (generar factura, marcar pagada, anular).
+CREATE POLICY "facturas_admin_secretaria_creacion" ON factura
+FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+CREATE POLICY "facturas_admin_secretaria_actualizacion" ON factura
+FOR UPDATE USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));

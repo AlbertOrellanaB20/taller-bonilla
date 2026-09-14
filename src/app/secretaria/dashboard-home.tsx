@@ -2,8 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { fmtCLP, TODAY } from "./lib/data";
+import { fmtUSD as fmtCLP, todayDMY } from "@/lib/format";
 import { useSecretariaData } from "./context";
+
+const TODAY = todayDMY();
 
 // ── Count-up ──────────────────────────────────────────────────────────────────
 function useCountUp(target: number, dur = 1300) {

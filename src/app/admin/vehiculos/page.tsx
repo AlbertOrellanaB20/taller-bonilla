@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+import VehiculosView from "@/app/secretaria/vehiculos/vehiculos-view";
 
-export default function VehiculosPage() {
-  return <ComingSoon label="Vehículos" />;
+export default function AdminVehiculosPage() {
+  return <VehiculosView />;
 }

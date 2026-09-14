@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+import FacturacionView from "@/app/secretaria/facturacion/facturacion-view";
 
-export default function FacturacionPage() {
-  return <ComingSoon label="Facturación" />;
+export default function AdminFacturacionPage() {
+  return <FacturacionView />;
 }

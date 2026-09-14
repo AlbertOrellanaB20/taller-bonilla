@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { nextClientId } from "../lib/data";
 import { useSecretariaData } from "../context";
 
 const BLANK = { name: "", phone: "", address: "", dui: "" };
@@ -12,6 +11,7 @@ export default function ClientesView() {
   const [form, setForm] = useState(BLANK);
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const filtered = clients.filter((c) =>
     `${c.name} ${c.phone} ${c.dui}`.toLowerCase().includes(search.toLowerCase())
@@ -21,12 +21,17 @@ export default function ClientesView() {
     return vehicles.filter((v) => v.clientId === clientId).length;
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!form.name.trim()) return;
-    addClient({ id: nextClientId(), ...form });
-    setForm(BLANK);
-    setSaved(true);
-    setTimeout(() => { setSaved(false); setModal(false); }, 1800);
+    setError(null);
+    try {
+      await addClient(form);
+      setForm(BLANK);
+      setSaved(true);
+      setTimeout(() => { setSaved(false); setModal(false); }, 1800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el cliente. Intenta de nuevo.");
+    }
   }
 
   const field = (label: string, key: keyof typeof BLANK, placeholder: string) => (
@@ -129,6 +134,11 @@ export default function ClientesView() {
               {field("Teléfono", "phone", "Ej: 7123-4567")}
               {field("Dirección", "address", "Ej: Col. Escalón, San Salvador")}
               {field("DUI", "dui", "Ej: 01234567-8")}
+              {error && (
+                <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
+                  {error}
+                </div>
+              )}
             </div>
 
             <div style={{ padding: "16px 24px", borderTop: "1px solid #2a2a2e", display: "flex", gap: 10, justifyContent: "flex-end" }}>

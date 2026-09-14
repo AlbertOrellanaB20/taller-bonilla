@@ -1,5 +1,5 @@
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+import RepuestosView from "@/app/inventario/repuestos/repuestos-view";
 
-export default function InventarioPage() {
-  return <ComingSoon label="Inventario" />;
+export default function AdminInventarioPage() {
+  return <RepuestosView />;
 }

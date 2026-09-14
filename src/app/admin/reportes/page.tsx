@@ -1,5 +1,7 @@
-import { ComingSoon } from "@/components/dashboard/coming-soon";
+import ReportesView from "@/app/supervisora/reportes/reportes-view";
+import { getSupervisoraReportes } from "@/lib/domain/reportes";
 
-export default function ReportesPage() {
-  return <ComingSoon label="Reportes" />;
+export default async function AdminReportesPage() {
+  const data = await getSupervisoraReportes();
+  return <ReportesView data={data} />;
 }

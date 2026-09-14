@@ -1,24 +1,20 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { crearCliente, crearVehiculo, type Client, type Vehicle } from "@/lib/domain/clientes-vehiculos";
+import { crearOrden, listOrdenesSecretaria, type ServiceOrder } from "@/lib/domain/ordenes";
 import {
-  type Client,
-  type Vehicle,
-  type ServiceOrder,
-  type Invoice,
+  generarFactura,
+  marcarFacturaPagada,
+  anularFactura,
+  listOrdenesListasParaFacturar,
+  listFacturas,
   type ReadyOrder,
+  type Invoice,
   type PayMethod,
-  SEED_CLIENTS,
-  SEED_VEHICLES,
-  SEED_SERVICE_ORDERS,
-  SEED_INVOICES,
-  SEED_READY_ORDERS,
-  nextInvoiceNumber,
-  calcIva,
-  calcTotal,
-  fmtCLP,
-  TODAY,
-} from "./lib/data";
+} from "@/lib/domain/facturacion";
+import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
+import { calcIva, calcTotal, fmtUSD } from "@/lib/format";
 
 interface SecretariaDataValue {
   clients: Client[];
@@ -26,9 +22,10 @@ interface SecretariaDataValue {
   serviceOrders: ServiceOrder[];
   invoices: Invoice[];
   readyOrders: ReadyOrder[];
-  addClient: (c: Client) => void;
-  addVehicle: (v: Vehicle) => void;
-  addServiceOrder: (o: ServiceOrder) => void;
+  serviceCatalog: string[];
+  addClient: (c: Omit<Client, "id">) => Promise<Client>;
+  addVehicle: (v: Omit<Vehicle, "id">) => Promise<Vehicle>;
+  addServiceOrder: (vehicleId: number, services: string[], deliveryInputDate: string) => Promise<ServiceOrder>;
   openGenerate: (orderId?: number) => void;
   viewDetail: (id: number) => void;
   markPaid: (id: number) => void;
@@ -43,40 +40,74 @@ export function useSecretariaData(): SecretariaDataValue {
   return ctx;
 }
 
-export function SecretariaDataProvider({ children }: { children: ReactNode }) {
-  const [invoices, setInvoices] = useState<Invoice[]>(SEED_INVOICES);
-  const [readyOrders, setReadyOrders] = useState<ReadyOrder[]>(SEED_READY_ORDERS);
-  const [clients, setClients] = useState<Client[]>(SEED_CLIENTS);
-  const [vehicles, setVehicles] = useState<Vehicle[]>(SEED_VEHICLES);
-  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>(SEED_SERVICE_ORDERS);
+interface ProviderProps {
+  children: ReactNode;
+  initialClients: Client[];
+  initialVehicles: Vehicle[];
+  initialServiceOrders: ServiceOrder[];
+  initialInvoices: Invoice[];
+  initialReadyOrders: ReadyOrder[];
+  serviceCatalog: string[];
+}
+
+export function SecretariaDataProvider({
+  children,
+  initialClients,
+  initialVehicles,
+  initialServiceOrders,
+  initialInvoices,
+  initialReadyOrders,
+  serviceCatalog,
+}: ProviderProps) {
+  const [clients, setClients] = useState<Client[]>(initialClients);
+  const [vehicles, setVehicles] = useState<Vehicle[]>(initialVehicles);
+  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>(initialServiceOrders);
+  const [invoices, setInvoices] = useState<Invoice[]>(initialInvoices);
+  const [readyOrders, setReadyOrders] = useState<ReadyOrder[]>(initialReadyOrders);
   const [genModal, setGenModal] = useState<number | "new" | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
 
-  function handleConfirm(orderId: number, method: PayMethod): string {
-    const order = readyOrders.find((o) => o.id === orderId)!;
-    const num = nextInvoiceNumber();
-    const sub = order.subtotal;
-    const iva = calcIva(sub);
-    const newInvoice: Invoice = {
-      id: Date.now(),
-      number: num,
-      orderId,
-      plate: order.plate,
-      model: order.model,
-      client: order.client,
-      mechanic: order.mechanic,
-      services: order.services,
-      subtotal: sub,
-      iva,
-      total: calcTotal(sub),
-      paymentMethod: method,
-      status: "Pendiente",
-      date: TODAY,
-    };
-    setInvoices((prev) => [newInvoice, ...prev]);
-    setReadyOrders((prev) => prev.filter((o) => o.id !== orderId));
-    setGenModal(null);
-    return num;
+  const refetch = useCallback(async () => {
+    const [orders, ready, invs] = await Promise.all([listOrdenesSecretaria(), listOrdenesListasParaFacturar(), listFacturas()]);
+    setServiceOrders(orders);
+    setReadyOrders(ready);
+    setInvoices(invs);
+  }, []);
+
+  useRealtimeTable(["orden_servicio", "detalle_servicio", "factura"], refetch);
+
+  async function addClient(input: Omit<Client, "id">): Promise<Client> {
+    const created = await crearCliente(input);
+    setClients((prev) => [...prev, created]);
+    return created;
+  }
+
+  async function addVehicle(input: Omit<Vehicle, "id">): Promise<Vehicle> {
+    const created = await crearVehiculo(input);
+    setVehicles((prev) => [...prev, created]);
+    return created;
+  }
+
+  async function addServiceOrder(vehicleId: number, services: string[], deliveryInputDate: string): Promise<ServiceOrder> {
+    const created = await crearOrden(vehicleId, services, deliveryInputDate);
+    setServiceOrders((prev) => [created, ...prev]);
+    return created;
+  }
+
+  function markPaid(id: number) {
+    setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, status: "Pagada" } : inv)));
+    marcarFacturaPagada(id).catch(() => refetch());
+  }
+
+  function cancelInvoice(id: number) {
+    setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, status: "Anulada" } : inv)));
+    anularFactura(id).catch(() => refetch());
+  }
+
+  async function handleConfirm(orderId: number, method: PayMethod): Promise<string> {
+    const { number } = await generarFactura(orderId, method);
+    await refetch();
+    return number;
   }
 
   const value: SecretariaDataValue = {
@@ -85,13 +116,14 @@ export function SecretariaDataProvider({ children }: { children: ReactNode }) {
     serviceOrders,
     invoices,
     readyOrders,
-    addClient: (c) => setClients((prev) => [...prev, c]),
-    addVehicle: (v) => setVehicles((prev) => [...prev, v]),
-    addServiceOrder: (o) => setServiceOrders((prev) => [...prev, o]),
+    serviceCatalog,
+    addClient,
+    addVehicle,
+    addServiceOrder,
     openGenerate: (orderId) => setGenModal(orderId ?? "new"),
     viewDetail: (id) => setDetailId(id),
-    markPaid: (id) => setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, status: "Pagada" } : inv))),
-    cancelInvoice: (id) => setInvoices((prev) => prev.map((inv) => (inv.id === id ? { ...inv, status: "Anulada" } : inv))),
+    markPaid,
+    cancelInvoice,
   };
 
   const detailInvoice = invoices.find((inv) => inv.id === detailId) ?? null;
@@ -120,24 +152,34 @@ interface GenerateModalProps {
   readyOrders: ReadyOrder[];
   preSelectedId?: number;
   onClose: () => void;
-  onConfirm: (orderId: number, method: PayMethod) => string;
+  onConfirm: (orderId: number, method: PayMethod) => Promise<string>;
 }
 
 function GenerateModal({ readyOrders, preSelectedId, onClose, onConfirm }: GenerateModalProps) {
   const [orderId, setOrderId] = useState<number | "">(preSelectedId ?? (readyOrders[0]?.id ?? ""));
   const [method, setMethod] = useState<PayMethod | "">("");
   const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const order = readyOrders.find((o) => o.id === orderId);
   const sub = order?.subtotal ?? 0;
   const iva = calcIva(sub);
   const tot = calcTotal(sub);
 
-  function handleConfirm() {
+  async function handleConfirm() {
     if (!order || !method) return;
-    const num = onConfirm(order.id, method as PayMethod);
-    setSuccess(num);
-    setTimeout(onClose, 2400);
+    setError(null);
+    setSaving(true);
+    try {
+      const num = await onConfirm(order.id, method as PayMethod);
+      setSuccess(num);
+      setTimeout(onClose, 2400);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo generar la factura. Intenta de nuevo.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const methods: PayMethod[] = ["Efectivo", "Tarjeta", "Transferencia"];
@@ -176,7 +218,7 @@ function GenerateModal({ readyOrders, preSelectedId, onClose, onConfirm }: Gener
               <div style={{ position: "relative" }}>
                 <select value={orderId} onChange={(e) => setOrderId(Number(e.target.value))}
                   style={{ background: "#252529", border: "1.5px solid #35353a", color: "#f0f0f2", borderRadius: 8, padding: "10px 36px 10px 14px", width: "100%", fontSize: 13, outline: "none", appearance: "none", cursor: "pointer" }}>
-                  {readyOrders.map((o) => <option key={o.id} value={o.id}>{o.plate} — {o.client} — {fmtCLP(o.subtotal)}</option>)}
+                  {readyOrders.map((o) => <option key={o.id} value={o.id}>{o.plate} — {o.client} — {fmtUSD(o.subtotal)}</option>)}
                 </select>
                 <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#5a5a65" }}>▾</span>
               </div>
@@ -199,15 +241,15 @@ function GenerateModal({ readyOrders, preSelectedId, onClose, onConfirm }: Gener
               <div style={{ borderTop: "1px solid #35353a", paddingTop: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ color: "#8a8a96", fontSize: 13 }}>Subtotal</span>
-                  <span style={{ color: "#c0c0c8", fontSize: 13 }}>{fmtCLP(sub)}</span>
+                  <span style={{ color: "#c0c0c8", fontSize: 13 }}>{fmtUSD(sub)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                  <span style={{ color: "#8a8a96", fontSize: 13 }}>IVA (19%)</span>
-                  <span style={{ color: "#c0c0c8", fontSize: 13 }}>{fmtCLP(iva)}</span>
+                  <span style={{ color: "#8a8a96", fontSize: 13 }}>IVA (13%)</span>
+                  <span style={{ color: "#c0c0c8", fontSize: 13 }}>{fmtUSD(iva)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", background: "rgba(163,18,18,0.08)", borderRadius: 6, padding: "8px 10px" }}>
                   <span style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 700 }}>Total</span>
-                  <span style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 700 }}>{fmtCLP(tot)}</span>
+                  <span style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 700 }}>{fmtUSD(tot)}</span>
                 </div>
               </div>
             </div>
@@ -228,15 +270,21 @@ function GenerateModal({ readyOrders, preSelectedId, onClose, onConfirm }: Gener
               })}
             </div>
           </div>
+
+          {error && (
+            <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "10px 14px", color: "#e87070", fontSize: 13 }}>
+              {error}
+            </div>
+          )}
         </div>
 
         <div style={{ padding: "16px 24px", borderTop: "1px solid #2a2a2e", display: "flex", gap: 10, justifyContent: "flex-end" }}>
           <button onClick={onClose} style={{ background: "transparent", border: "1px solid #35353a", borderRadius: 8, padding: "9px 20px", color: "#8a8a96", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Cancelar</button>
-          <button onClick={handleConfirm} disabled={!order || !method}
+          <button onClick={handleConfirm} disabled={!order || !method || saving}
             style={{ background: !order || !method ? "#35353a" : "#A31212", border: "none", borderRadius: 8, padding: "9px 22px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: !order || !method ? "not-allowed" : "pointer", transition: "all 0.2s", opacity: !order || !method ? 0.5 : 1 }}
             onMouseEnter={(e) => { if (order && method) { e.currentTarget.style.background = "#c01515"; e.currentTarget.style.boxShadow = "0 0 16px rgba(163,18,18,0.4)"; } }}
             onMouseLeave={(e) => { e.currentTarget.style.background = !order || !method ? "#35353a" : "#A31212"; e.currentTarget.style.boxShadow = "none"; }}>
-            Confirmar y generar
+            {saving ? "Generando..." : "Confirmar y generar"}
           </button>
         </div>
       </div>
@@ -287,13 +335,13 @@ function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => vo
           </div>
           <div style={{ background: "#f8f8f8", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#555" }}>
-              <span>Subtotal</span><span>{fmtCLP(invoice.subtotal)}</span>
+              <span>Subtotal</span><span>{fmtUSD(invoice.subtotal)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#555" }}>
-              <span>IVA (19%)</span><span>{fmtCLP(invoice.iva)}</span>
+              <span>IVA (13%)</span><span>{fmtUSD(invoice.iva)}</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 800, borderTop: "1.5px solid #e0e0e0", paddingTop: 8 }}>
-              <span>TOTAL</span><span style={{ color: "#A31212" }}>{fmtCLP(invoice.total)}</span>
+              <span>TOTAL</span><span style={{ color: "#A31212" }}>{fmtUSD(invoice.total)}</span>
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>

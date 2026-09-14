@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { IconBox, IconTruck, IconWarning } from "@/components/dashboard/icons";
 import { useInventarioData } from "./context";
-import { stockStatus, STATUS_STYLE, MONTHLY_USAGE } from "./lib/data";
+import { stockStatus, STATUS_STYLE } from "./lib/data";
+import type { UsoRepuesto } from "@/lib/domain/inventario";
 
 function useCountUp(target: number, dur = 1200) {
   const [v, setV] = useState(0);
@@ -19,13 +20,13 @@ function useCountUp(target: number, dur = 1200) {
   return v;
 }
 
-function UsageChart() {
+function UsageChart({ data }: { data: UsoRepuesto[] }) {
   const [hov, setHov] = useState<number | null>(null);
-  const max = Math.max(...MONTHLY_USAGE.map((d) => d.used), 1);
+  const max = Math.max(...data.map((d) => d.used), 1);
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 120 }}>
-        {MONTHLY_USAGE.map((d, i) => (
+        {data.map((d, i) => (
           <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", height: "100%", justifyContent: "flex-end", gap: 4 }}>
             {hov === i && <span style={{ fontSize: 9, fontWeight: 700, color: "#f0f0f2", background: "#2a2a2e", padding: "1px 5px", borderRadius: 3, whiteSpace: "nowrap" }}>{d.used} uds.</span>}
             <div
@@ -37,7 +38,7 @@ function UsageChart() {
         ))}
       </div>
       <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-        {MONTHLY_USAGE.map((d, i) => (
+        {data.map((d, i) => (
           <div key={i} style={{ flex: 1, textAlign: "center" }}>
             <span style={{ fontSize: 9, color: hov === i ? "#f0f0f2" : "#5a5a65", transition: "color 0.2s", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name.split(" ")[0]}</span>
           </div>
@@ -47,7 +48,7 @@ function UsageChart() {
   );
 }
 
-export default function DashboardHome() {
+export default function DashboardHome({ topUsedParts }: { topUsedParts: UsoRepuesto[] }) {
   const { parts, suppliers, openAdjust } = useInventarioData();
 
   const totalParts = parts.length;
@@ -149,15 +150,21 @@ export default function DashboardHome() {
 
         <div className="inv-card">
           <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, margin: "0 0 18px" }}>Más utilizados este mes</h2>
-          <UsageChart />
-          <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
-            {MONTHLY_USAGE.slice(0, 4).map((d, i) => (
-              <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ color: "#8a8a96", fontSize: 12 }}>{d.name}</span>
-                <span style={{ color: "#a78bfa", fontSize: 12, fontWeight: 700 }}>{d.used} uds.</span>
+          {topUsedParts.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 0", color: "#5a5a65", fontSize: 13 }}>Todavía no hay repuestos usados este mes.</div>
+          ) : (
+            <>
+              <UsageChart data={topUsedParts} />
+              <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
+                {topUsedParts.slice(0, 4).map((d, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ color: "#8a8a96", fontSize: 12 }}>{d.name}</span>
+                    <span style={{ color: "#a78bfa", fontSize: 12, fontWeight: 700 }}>{d.used} uds.</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </div>
       </div>
     </div>

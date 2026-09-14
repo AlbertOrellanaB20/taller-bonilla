@@ -5,6 +5,8 @@ import { getUsuarioActual, initialsFor, firstNameOf } from "@/lib/auth";
 import type { NavItem } from "@/components/dashboard/sidebar";
 import { IconDashboard, IconClipboard } from "@/components/dashboard/icons";
 import { MecanicoDataProvider } from "./context";
+import { listOrdenesMecanico } from "@/lib/domain/ordenes";
+import { listRepuestos } from "@/lib/domain/inventario";
 
 const NAV: NavItem[] = [
   { href: "/mecanico", label: "Dashboard", icon: <IconDashboard /> },
@@ -14,6 +16,9 @@ const NAV: NavItem[] = [
 export default async function MecanicoLayout({ children }: { children: ReactNode }) {
   const usuario = await getUsuarioActual();
   if (!usuario) redirect("/login");
+
+  const [orders, partsCatalog] = await Promise.all([listOrdenesMecanico(), listRepuestos()]);
+  const pendientesOEnProceso = orders.filter((o) => o.status === "Pendiente" || o.status === "En Proceso").length;
 
   return (
     <DashboardShell
@@ -25,9 +30,11 @@ export default async function MecanicoLayout({ children }: { children: ReactNode
       badgeColor="#4ade80"
       avatarGradient="linear-gradient(135deg, #166534 0%, #14532d 100%)"
       sidebarWidth={200}
-      notificationCount={2}
+      notificationCount={pendientesOEnProceso}
     >
-      <MecanicoDataProvider>{children}</MecanicoDataProvider>
+      <MecanicoDataProvider initialOrders={orders} partsCatalog={partsCatalog}>
+        {children}
+      </MecanicoDataProvider>
     </DashboardShell>
   );
 }

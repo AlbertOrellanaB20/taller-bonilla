@@ -4,6 +4,7 @@ import { DashboardShell } from "@/components/dashboard/shell";
 import { getUsuarioActual, initialsFor, firstNameOf } from "@/lib/auth";
 import type { NavItem } from "@/components/dashboard/sidebar";
 import { IconDashboard, IconClipboard, IconBadge, IconChart } from "@/components/dashboard/icons";
+import { listOrdenesSupervisora } from "@/lib/domain/ordenes";
 
 const NAV: NavItem[] = [
   { href: "/supervisora", label: "Dashboard", icon: <IconDashboard /> },
@@ -16,6 +17,9 @@ export default async function SupervisoraLayout({ children }: { children: ReactN
   const usuario = await getUsuarioActual();
   if (!usuario) redirect("/login");
 
+  const orders = await listOrdenesSupervisora();
+  const pendingAssign = orders.filter((o) => o.mechanicId === null && o.status !== "Entregado").length;
+
   return (
     <DashboardShell
       navItems={NAV}
@@ -25,7 +29,7 @@ export default async function SupervisoraLayout({ children }: { children: ReactN
       badgeBg="#b45309"
       avatarGradient="linear-gradient(135deg, #b45309 0%, #92400e 100%)"
       sidebarWidth={240}
-      notificationCount={2}
+      notificationCount={pendingAssign}
     >
       {children}
     </DashboardShell>

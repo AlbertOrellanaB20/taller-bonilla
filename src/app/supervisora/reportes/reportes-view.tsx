@@ -1,35 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-
-// TODO: reemplazar por datos reales calculados desde Supabase, y conectar
-// los botones de exportar a generación real de PDF/Excel (CLAUDE.md exige
-// reportes con diseño cuidado: logo, colores del sistema, tablas formateadas).
-
-const TOP_SERVICES = [
-  { name: "Cambio de aceite", count: 47 },
-  { name: "Frenos y pastillas", count: 31 },
-  { name: "Aire acondicionado", count: 28 },
-  { name: "Alineación y balanceo", count: 22 },
-  { name: "Diagnóstico electrónico", count: 19 },
-  { name: "Cambio de batería", count: 14 },
-];
-
-const AVG_TIME = [
-  { name: "Cambio de aceite", hours: 1.5 },
-  { name: "Alineación", hours: 1.0 },
-  { name: "Cambio de batería", hours: 0.8 },
-  { name: "Diagnóstico", hours: 2.0 },
-  { name: "Frenos", hours: 3.5 },
-  { name: "Aire acondicionado", hours: 4.2 },
-  { name: "Revisión de motor", hours: 8.0 },
-];
-
-const MECHANIC_PERF = [
-  { name: "Pedro Salazar", completed: 18 },
-  { name: "José Ramírez", completed: 16 },
-  { name: "Noé Arias", completed: 14 },
-];
+import type { SupervisoraReportes } from "@/lib/domain/reportes";
+import { exportReportePdf, exportReporteExcel } from "@/lib/reports/export";
 
 function HBarChart({
   data,
@@ -107,24 +80,44 @@ function VertBarChart({ data }: { data: { name: string; count: number }[] }) {
   );
 }
 
-function ExportButton({ label, format }: { label: string; format: "pdf" | "xlsx" }) {
+function ExportButton({ label, format, subtitle, columns, rows }: {
+  label: string;
+  format: "pdf" | "xlsx";
+  subtitle: string;
+  columns: string[];
+  rows: (string | number)[][];
+}) {
   const isPdf = format === "pdf";
+  const [busy, setBusy] = useState(false);
+
+  async function handleExport() {
+    if (rows.length === 0) return;
+    setBusy(true);
+    try {
+      if (isPdf) exportReportePdf(label, subtitle, columns, rows);
+      else await exportReporteExcel(label, columns, rows);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <button
-      onClick={() => alert(`Exportando "${label}" como ${format.toUpperCase()}… (función visual, sin backend)`)}
-      style={{ display: "flex", alignItems: "center", gap: 6, background: isPdf ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)", border: `1px solid ${isPdf ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)"}`, borderRadius: 7, padding: "7px 12px", color: isPdf ? "#f87171" : "#4ade80", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap" }}
-      onMouseEnter={(e) => (e.currentTarget.style.opacity = "0.75")}
-      onMouseLeave={(e) => (e.currentTarget.style.opacity = "1")}>
+      onClick={handleExport}
+      disabled={busy || rows.length === 0}
+      style={{ display: "flex", alignItems: "center", gap: 6, background: isPdf ? "rgba(239,68,68,0.08)" : "rgba(34,197,94,0.08)", border: `1px solid ${isPdf ? "rgba(239,68,68,0.2)" : "rgba(34,197,94,0.2)"}`, borderRadius: 7, padding: "7px 12px", color: isPdf ? "#f87171" : "#4ade80", fontSize: 11, fontWeight: 600, cursor: rows.length === 0 ? "not-allowed" : "pointer", opacity: rows.length === 0 ? 0.5 : 1, transition: "all 0.2s", whiteSpace: "nowrap" }}
+      onMouseEnter={(e) => (e.currentTarget.style.opacity = rows.length === 0 ? "0.5" : "0.75")}
+      onMouseLeave={(e) => (e.currentTarget.style.opacity = rows.length === 0 ? "0.5" : "1")}>
       {isPdf
         ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
         : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /></svg>
       }
-      {format.toUpperCase()}
+      {busy ? "..." : format.toUpperCase()}
     </button>
   );
 }
 
-function ReportCard({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+function ReportCard({ title, description, columns, rows, children }: { title: string; description: string; columns: string[]; rows: (string | number)[][]; children: ReactNode }) {
   return (
     <div style={{ background: "#212125", border: "1px solid #2a2a2e", borderRadius: 14, overflow: "hidden" }}>
       <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e1e22", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -133,8 +126,8 @@ function ReportCard({ title, description, children }: { title: string; descripti
           <p style={{ color: "#5a5a65", fontSize: 12, margin: "3px 0 0" }}>{description}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <ExportButton label={title} format="pdf" />
-          <ExportButton label={title} format="xlsx" />
+          <ExportButton label={title} format="pdf" subtitle={description} columns={columns} rows={rows} />
+          <ExportButton label={title} format="xlsx" subtitle={description} columns={columns} rows={rows} />
         </div>
       </div>
       <div style={{ padding: 20 }}>{children}</div>
@@ -142,30 +135,65 @@ function ReportCard({ title, description, children }: { title: string; descripti
   );
 }
 
-export default function ReportesView() {
+export default function ReportesView({ data }: { data: SupervisoraReportes }) {
+  const mesActual = new Date().toLocaleDateString("es-SV", { month: "long", year: "numeric" });
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 1000 }}>
       <div>
         <h1 style={{ color: "#f0f0f2", fontSize: 20, fontWeight: 700, margin: 0 }}>Reportes</h1>
-        <p style={{ color: "#5a5a65", fontSize: 13, margin: "2px 0 0" }}>Septiembre 2026 · Taller Bonilla</p>
+        <p style={{ color: "#5a5a65", fontSize: 13, margin: "2px 0 0" }}>{mesActual} · Taller Bonilla</p>
       </div>
 
-      <ReportCard title="Servicios más solicitados del mes" description="Total de órdenes por tipo de servicio en septiembre 2026">
-        <VertBarChart data={TOP_SERVICES.map((s) => ({ name: s.name, count: s.count }))} />
+      <ReportCard
+        title="Servicios más solicitados del mes"
+        description={`Total de órdenes por tipo de servicio en ${mesActual}`}
+        columns={["Servicio", "Órdenes"]}
+        rows={data.serviciosTopMes.map((s) => [s.name, s.count])}
+      >
+        {data.serviciosTopMes.length === 0 ? (
+          <EmptyState text="Todavía no hay servicios registrados este mes." />
+        ) : (
+          <VertBarChart data={data.serviciosTopMes} />
+        )}
       </ReportCard>
 
-      <ReportCard title="Tiempo promedio de reparación" description="Horas promedio por tipo de servicio completado">
-        <HBarChart data={AVG_TIME as unknown as Record<string, unknown>[]} labelKey="name" valueKey="hours" unit=" h" color="#b45309" hoverColor="#d97706" />
+      <ReportCard
+        title="Tiempo promedio de reparación"
+        description="Horas promedio por tipo de servicio completado"
+        columns={["Servicio", "Horas promedio"]}
+        rows={data.tiempoPromedioPorServicio.map((s) => [s.name, s.hours])}
+      >
+        {data.tiempoPromedioPorServicio.length === 0 ? (
+          <EmptyState text="Todavía no hay órdenes finalizadas para calcular tiempos." />
+        ) : (
+          <HBarChart data={data.tiempoPromedioPorServicio as unknown as Record<string, unknown>[]} labelKey="name" valueKey="hours" unit=" h" color="#b45309" hoverColor="#d97706" />
+        )}
       </ReportCard>
 
-      <ReportCard title="Desempeño por mecánico" description="Órdenes completadas en el mes actual">
-        <HBarChart data={MECHANIC_PERF as unknown as Record<string, unknown>[]} labelKey="name" valueKey="completed" unit=" órdenes" color="#059669" hoverColor="#10b981" />
-        <div style={{ marginTop: 16, padding: "10px 14px", background: "#252529", borderRadius: 8 }}>
-          <p style={{ color: "#5a5a65", fontSize: 12, margin: 0 }}>
-            Total equipo: <span style={{ color: "#f0f0f2", fontWeight: 600 }}>{MECHANIC_PERF.reduce((a, m) => a + m.completed, 0)} órdenes completadas</span> este mes
-          </p>
-        </div>
+      <ReportCard
+        title="Desempeño por mecánico"
+        description="Órdenes completadas en el mes actual"
+        columns={["Mecánico", "Órdenes completadas"]}
+        rows={data.desempenoPorMecanico.map((m) => [m.name, m.completed])}
+      >
+        {data.desempenoPorMecanico.length === 0 ? (
+          <EmptyState text="Todavía no hay órdenes completadas este mes." />
+        ) : (
+          <>
+            <HBarChart data={data.desempenoPorMecanico as unknown as Record<string, unknown>[]} labelKey="name" valueKey="completed" unit=" órdenes" color="#059669" hoverColor="#10b981" />
+            <div style={{ marginTop: 16, padding: "10px 14px", background: "#252529", borderRadius: 8 }}>
+              <p style={{ color: "#5a5a65", fontSize: 12, margin: 0 }}>
+                Total equipo: <span style={{ color: "#f0f0f2", fontWeight: 600 }}>{data.desempenoPorMecanico.reduce((a, m) => a + m.completed, 0)} órdenes completadas</span> este mes
+              </p>
+            </div>
+          </>
+        )}
       </ReportCard>
     </div>
   );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return <div style={{ textAlign: "center", padding: "24px 0", color: "#5a5a65", fontSize: 13 }}>{text}</div>;
 }

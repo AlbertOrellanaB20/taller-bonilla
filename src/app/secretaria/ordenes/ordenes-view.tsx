@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { type ServiceOrder, SERVICE_CATALOG, TODAY, nextServiceOrderId, nextClientId, nextVehicleId, toInputDate, fromInputDate } from "../lib/data";
+import { type ServiceOrder } from "@/lib/domain/ordenes";
+import { toInputDate, fromInputDate } from "@/lib/format";
 import { useSecretariaData } from "../context";
 
 const BLANK_VEH = { plate: "", brand: "", model: "", year: new Date().getFullYear(), color: "", mileage: 0, clientId: 0 };
 const BLANK_CLI = { name: "", phone: "", address: "", dui: "" };
+const TODAY = fromInputDate(new Date().toISOString().slice(0, 10));
 
 function tomorrow() {
   const d = new Date();
@@ -14,7 +16,7 @@ function tomorrow() {
 }
 
 export default function OrdenesView() {
-  const { serviceOrders, vehicles, clients, addServiceOrder, addVehicle, addClient } = useSecretariaData();
+  const { serviceOrders, vehicles, clients, serviceCatalog, addServiceOrder, addVehicle, addClient } = useSecretariaData();
 
   const [modal, setModal] = useState(false);
   const [vehicleId, setVehicleId] = useState<number>(0);
@@ -26,6 +28,7 @@ export default function OrdenesView() {
   const [delivery, setDelivery] = useState(tomorrow());
   const [comprobante, setComprobante] = useState<ServiceOrder | null>(null);
   const [search, setSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const filtered = serviceOrders.filter((o) => {
     const v = vehicles.find((x) => x.id === o.vehicleId);
@@ -52,36 +55,35 @@ export default function OrdenesView() {
     setNewClient(false);
     setServices([]);
     setDelivery(tomorrow());
+    setError(null);
     setModal(true);
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (services.length === 0) return;
-    let finalVehicleId = vehicleId;
+    setError(null);
+    try {
+      let finalVehicleId = vehicleId;
 
-    if (newVehicle) {
-      if (!veh.plate.trim() || !veh.brand.trim()) return;
-      let clientId = veh.clientId;
-      if (newClient) {
-        if (!cli.name.trim()) return;
-        clientId = nextClientId();
-        addClient({ id: clientId, ...cli });
+      if (newVehicle) {
+        if (!veh.plate.trim() || !veh.brand.trim()) return;
+        let clientId = veh.clientId;
+        if (newClient) {
+          if (!cli.name.trim()) return;
+          const createdClient = await addClient(cli);
+          clientId = createdClient.id;
+        }
+        const createdVehicle = await addVehicle({ ...veh, clientId });
+        finalVehicleId = createdVehicle.id;
       }
-      finalVehicleId = nextVehicleId();
-      addVehicle({ id: finalVehicleId, ...veh, clientId });
-    }
 
-    if (!finalVehicleId) return;
-    const order: ServiceOrder = {
-      id: nextServiceOrderId(),
-      vehicleId: finalVehicleId,
-      services,
-      receivedDate: TODAY,
-      estimatedDelivery: fromInputDate(delivery),
-    };
-    addServiceOrder(order);
-    setModal(false);
-    setComprobante(order);
+      if (!finalVehicleId) return;
+      const order = await addServiceOrder(finalVehicleId, services, delivery);
+      setModal(false);
+      setComprobante(order);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo registrar la orden. Intenta de nuevo.");
+    }
   }
 
   const inputStyle: React.CSSProperties = { background: "#252529", border: "1.5px solid #35353a", color: "#f0f0f2", borderRadius: 8, padding: "10px 14px", width: "100%", fontSize: 13, outline: "none", boxSizing: "border-box" };
@@ -268,7 +270,7 @@ export default function OrdenesView() {
               <div>
                 <label style={labelStyle}>Servicios solicitados <span style={{ color: "#f87171" }}>*</span></label>
                 <div style={{ background: "#252529", border: "1.5px solid #35353a", borderRadius: 10, overflow: "hidden" }}>
-                  {SERVICE_CATALOG.map((s) => {
+                  {serviceCatalog.map((s) => {
                     const checked = services.includes(s);
                     return (
                       <label key={s} className="svc-check" style={{ borderBottom: "1px solid #1e1e22" }}>
@@ -291,6 +293,12 @@ export default function OrdenesView() {
                 <input type="date" value={delivery} min={toInputDate(TODAY)} onChange={(e) => setDelivery(e.target.value)}
                   style={{ ...inputStyle, colorScheme: "dark" }} />
               </div>
+
+              {error && (
+                <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "10px 14px", color: "#e87070", fontSize: 13 }}>
+                  {error}
+                </div>
+              )}
             </div>
 
             <div style={{ padding: "16px 24px", borderTop: "1px solid #2a2a2e", display: "flex", gap: 10, justifyContent: "flex-end" }}>

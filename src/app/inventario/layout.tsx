@@ -5,6 +5,7 @@ import type { NavItem } from "@/components/dashboard/sidebar";
 import { IconDashboard, IconBox, IconTruck } from "@/components/dashboard/icons";
 import { InventarioDataProvider } from "./context";
 import { InventarioShell } from "./shell-with-data";
+import { listRepuestos, listProveedores } from "@/lib/domain/inventario";
 
 const NAV: NavItem[] = [
   { href: "/inventario", label: "Dashboard", icon: <IconDashboard /> },
@@ -16,8 +17,10 @@ export default async function InventarioLayout({ children }: { children: ReactNo
   const usuario = await getUsuarioActual();
   if (!usuario) redirect("/login");
 
+  const [parts, suppliers] = await Promise.all([listRepuestos(), listProveedores()]);
+
   return (
-    <InventarioDataProvider>
+    <InventarioDataProvider initialParts={parts} initialSuppliers={suppliers}>
       <InventarioShell navItems={NAV} displayName={firstNameOf(usuario.nombreCompleto)} initials={initialsFor(usuario.nombreCompleto)}>
         {children}
       </InventarioShell>

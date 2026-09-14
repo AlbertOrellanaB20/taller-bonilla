@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { nextClientId, nextVehicleId } from "../lib/data";
 import { useSecretariaData } from "../context";
 
 const BLANK_VEH = { plate: "", brand: "", model: "", year: new Date().getFullYear(), color: "", mileage: 0, clientId: 0 };
@@ -20,6 +19,7 @@ export default function VehiculosView() {
   const [cli, setCli] = useState(BLANK_CLI);
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const filtered = vehicles.filter((v) => {
     const owner = clients.find((c) => c.id === v.clientId);
@@ -30,19 +30,24 @@ export default function VehiculosView() {
     return clients.find((c) => c.id === clientId)?.name ?? "—";
   }
 
-  function openModal() { setVeh({ ...BLANK_VEH, clientId: clients[0]?.id ?? 0 }); setCli(BLANK_CLI); setNewClient(false); setSaved(false); setModal(true); }
+  function openModal() { setVeh({ ...BLANK_VEH, clientId: clients[0]?.id ?? 0 }); setCli(BLANK_CLI); setNewClient(false); setSaved(false); setError(null); setModal(true); }
 
-  function handleSave() {
+  async function handleSave() {
     if (!veh.plate.trim() || !veh.brand.trim()) return;
-    let clientId = veh.clientId;
-    if (newClient) {
-      if (!cli.name.trim()) return;
-      clientId = nextClientId();
-      addClient({ id: clientId, ...cli });
+    setError(null);
+    try {
+      let clientId = veh.clientId;
+      if (newClient) {
+        if (!cli.name.trim()) return;
+        const created = await addClient(cli);
+        clientId = created.id;
+      }
+      await addVehicle({ ...veh, clientId });
+      setSaved(true);
+      setTimeout(() => { setSaved(false); setModal(false); }, 1800);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo guardar el vehículo. Intenta de nuevo.");
     }
-    addVehicle({ id: nextVehicleId(), ...veh, clientId });
-    setSaved(true);
-    setTimeout(() => { setSaved(false); setModal(false); }, 1800);
   }
 
   const inputStyle: React.CSSProperties = { background: "#252529", border: "1.5px solid #35353a", color: "#f0f0f2", borderRadius: 8, padding: "10px 14px", width: "100%", fontSize: 13, outline: "none", boxSizing: "border-box" };
@@ -194,6 +199,12 @@ export default function VehiculosView() {
                   </div>
                 )}
               </div>
+
+              {error && (
+                <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
+                  {error}
+                </div>
+              )}
             </div>
 
             <div style={{ padding: "16px 24px", borderTop: "1px solid #2a2a2e", display: "flex", gap: 10, justifyContent: "flex-end" }}>
