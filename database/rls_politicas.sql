@@ -289,3 +289,32 @@ FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
 DROP POLICY IF EXISTS "facturas_admin_secretaria_actualizacion" ON factura;
 CREATE POLICY "facturas_admin_secretaria_actualizacion" ON factura
 FOR UPDATE USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+
+-- =====================================================================
+-- 11. fn_repuestos_mas_usados_mes — Inventario NO tiene permiso de leer
+--     orden_servicio (esa tabla es de otro módulo, ver política 6), pero
+--     el widget "Más utilizados este mes" de su Dashboard necesita cruzar
+--     detalle_repuesto con la fecha de la orden para saber qué se usó
+--     "este mes". Sin esta función, ese cruce se hacía con un JOIN normal
+--     desde el navegador y RLS bloqueaba silenciosamente el lado de
+--     orden_servicio (lo devolvía como null), así que el widget SIEMPRE
+--     salía vacío para Inventario, sin importar cuántos repuestos se
+--     usaran. La solución: una función SECURITY DEFINER que hace el
+--     cruce por dentro (saltándose RLS) pero solo devuelve nombre +
+--     cantidad usada — nunca datos de la orden, del cliente ni del
+--     mecánico — así que no se rompe el aislamiento entre módulos.
+-- =====================================================================
+CREATE OR REPLACE FUNCTION fn_repuestos_mas_usados_mes()
+RETURNS TABLE(nombre TEXT, usado BIGINT) AS $$
+    SELECT r.nombre, SUM(dr.cantidad)::BIGINT AS usado
+    FROM detalle_repuesto dr
+    JOIN repuesto r ON r.id_repuesto = dr.id_repuesto
+    JOIN orden_servicio os ON os.id_orden_servicio = dr.id_orden_servicio
+    WHERE os.fecha_ingreso >= date_trunc('month', now())
+      AND fn_rol_actual() IN ('Administrador', 'Inventario')
+    GROUP BY r.nombre
+    ORDER BY usado DESC
+    LIMIT 7
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION fn_repuestos_mas_usados_mes() TO authenticated;

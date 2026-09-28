@@ -113,22 +113,13 @@ export interface UsoRepuesto {
 
 export async function listRepuestosMasUsadosMes(): Promise<UsoRepuesto[]> {
   const supabase = await createClient();
-  const inicioMes = new Date();
-  inicioMes.setUTCDate(1);
-  inicioMes.setUTCHours(0, 0, 0, 0);
-
-  const { data, error } = await supabase
-    .from("detalle_repuesto")
-    .select("cantidad, repuesto:id_repuesto(nombre), orden_servicio:id_orden_servicio(fecha_ingreso)")
-    .gte("orden_servicio.fecha_ingreso", inicioMes.toISOString());
+  // Inventario no tiene permiso de leer orden_servicio (ver rls_politicas.sql),
+  // así que este cruce se hace con una función SECURITY DEFINER en vez de un
+  // select con join directo — de lo contrario RLS anula el lado de la orden
+  // y el widget sale vacío siempre. Ver database/rls_politicas.sql, sección 11.
+  const { data, error } = await supabase.rpc("fn_repuestos_mas_usados_mes");
   if (error) throw new Error(error.message);
-
-  const conteo = new Map<string, number>();
-  for (const d of data as unknown as { cantidad: number; repuesto: { nombre: string } | null; orden_servicio: { fecha_ingreso: string } | null }[]) {
-    if (!d.repuesto || !d.orden_servicio) continue;
-    conteo.set(d.repuesto.nombre, (conteo.get(d.repuesto.nombre) ?? 0) + d.cantidad);
-  }
-  return [...conteo.entries()].map(([name, used]) => ({ name, used })).sort((a, b) => b.used - a.used).slice(0, 7);
+  return (data as { nombre: string; usado: number }[]).map((d) => ({ name: d.nombre, used: Number(d.usado) }));
 }
 
 export async function ajustarStock(partId: number, type: "entrada" | "salida", qty: number, reason: string): Promise<Part> {

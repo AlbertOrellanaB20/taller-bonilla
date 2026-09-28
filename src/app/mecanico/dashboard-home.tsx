@@ -27,8 +27,8 @@ export default function DashboardHome() {
   const assignedToday = orders.filter((o) => o.receivedDate === todayDMY()).length;
   const inProcess = orders.filter((o) => o.status === "En Proceso").length;
   const completedWeek = orders.filter((o) => o.status === "Finalizado").length;
-  const activeOrders = orders.filter((o) => o.status !== "Finalizado");
-  const finishedOrders = orders.filter((o) => o.status === "Finalizado");
+  const activeOrders = orders.filter((o) => o.status !== "Finalizado" && o.status !== "Entregado");
+  const finishedOrders = orders.filter((o) => o.status === "Finalizado" || o.status === "Entregado");
 
   const c1 = useCountUp(assignedToday);
   const c2 = useCountUp(inProcess);
