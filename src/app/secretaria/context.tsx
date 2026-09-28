@@ -15,6 +15,7 @@ import {
 } from "@/lib/domain/facturacion";
 import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
 import { calcIva, calcTotal, fmtUSD } from "@/lib/format";
+import { montoEnLetras } from "@/lib/numero-a-letras";
 
 interface SecretariaDataValue {
   clients: Client[];
@@ -294,45 +295,74 @@ function GenerateModal({ readyOrders, preSelectedId, onClose, onConfirm }: Gener
 
 // ── Invoice Detail Modal ──────────────────────────────────────────────────────
 
+function CarWatermark() {
+  return (
+    <svg
+      viewBox="0 0 200 100"
+      style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%) rotate(-8deg)", width: "85%", opacity: 0.05, pointerEvents: "none", zIndex: 0 }}
+      fill="none" stroke="#A31212" strokeWidth="2.5"
+    >
+      <path d="M20 65 L28 45 Q32 38 42 38 L70 38 Q78 38 84 43 L100 55 L160 58 Q172 58 178 65 L178 72 L20 72 Z" />
+      <circle cx="52" cy="72" r="12" />
+      <circle cx="150" cy="72" r="12" />
+      <line x1="45" y1="38" x2="52" y2="55" />
+      <line x1="88" y1="38" x2="96" y2="55" />
+    </svg>
+  );
+}
+
 function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => void }) {
   const statusColor: Record<string, string> = { Pagada: "#4ade80", Pendiente: "#facc15", Anulada: "#94a3b8" };
   const methodColor: Record<string, string> = { Efectivo: "#4ade80", Tarjeta: "#60a5fa", Transferencia: "#a78bfa" };
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", padding: 16 }} onClick={onClose}>
-      <div style={{ width: "100%", maxWidth: 460, background: "#fff", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.6)", overflow: "hidden", maxHeight: "90vh", overflowY: "auto", color: "#111" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ background: "#0D0D0F", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ width: "100%", maxWidth: 480, background: "#fff", borderRadius: 16, boxShadow: "0 24px 80px rgba(0,0,0,0.6)", overflow: "hidden", maxHeight: "92vh", overflowY: "auto", color: "#111", position: "relative" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ background: "#0D0D0F", padding: "20px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative", zIndex: 1 }}>
           <div>
             <div style={{ color: "#fff", fontSize: 16, fontWeight: 800, letterSpacing: "-0.02em" }}>TALLER BONILLA</div>
-            <div style={{ color: "#A31212", fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Taller Automotriz</div>
+            <div style={{ color: "#A31212", fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase" }}>Taller Automotriz · Sonsonate, El Salvador</div>
           </div>
           <div style={{ textAlign: "right" }}>
             <div style={{ color: "#f0f0f2", fontSize: 18, fontWeight: 800 }}>{invoice.number}</div>
             <div style={{ color: "#5a5a65", fontSize: 11 }}>{invoice.date}</div>
           </div>
         </div>
-        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+
+        <CarWatermark />
+
+        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16, position: "relative", zIndex: 1 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ background: "#f8f8f8", borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ fontSize: 10, color: "#9a9a9a", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Facturado a</div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{invoice.client}</div>
+              {invoice.clientDui && <div style={{ fontSize: 11, color: "#666" }}>DUI: {invoice.clientDui}</div>}
             </div>
             <div style={{ background: "#f8f8f8", borderRadius: 8, padding: "10px 12px" }}>
               <div style={{ fontSize: 10, color: "#9a9a9a", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Vehículo</div>
               <div style={{ fontWeight: 600, fontSize: 13 }}>{invoice.plate}</div>
-              <div style={{ fontSize: 11, color: "#666" }}>{invoice.model}</div>
+              <div style={{ fontSize: 11, color: "#666" }}>{invoice.model} {invoice.vehicleYear || ""}</div>
             </div>
           </div>
+
           <div>
             <div style={{ fontSize: 11, color: "#9a9a9a", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Servicios realizados</div>
             <div style={{ border: "1px solid #e8e8e8", borderRadius: 8, overflow: "hidden" }}>
-              {invoice.services.map((s, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", borderBottom: i < invoice.services.length - 1 ? "1px solid #f0f0f0" : "none", fontSize: 13 }}>
-                  <span>{s}</span>
+              {invoice.serviceLines.map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 12px", borderBottom: i < invoice.serviceLines.length - 1 || invoice.partLines.length > 0 ? "1px solid #f0f0f0" : "none", fontSize: 13 }}>
+                  <span>{s.name}</span>
+                  <span style={{ fontWeight: 600 }}>{fmtUSD(s.price)}</span>
+                </div>
+              ))}
+              {invoice.partLines.map((p, i) => (
+                <div key={`p-${i}`} style={{ display: "flex", justifyContent: "space-between", padding: "9px 12px", borderBottom: i < invoice.partLines.length - 1 ? "1px solid #f0f0f0" : "none", fontSize: 13 }}>
+                  <span>{p.name} <span style={{ color: "#999" }}>x{p.qty}</span></span>
+                  <span style={{ fontWeight: 600 }}>{fmtUSD(p.subtotal)}</span>
                 </div>
               ))}
             </div>
           </div>
+
           <div style={{ background: "#f8f8f8", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#555" }}>
               <span>Subtotal</span><span>{fmtUSD(invoice.subtotal)}</span>
@@ -344,6 +374,11 @@ function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => vo
               <span>TOTAL</span><span style={{ color: "#A31212" }}>{fmtUSD(invoice.total)}</span>
             </div>
           </div>
+
+          <div style={{ fontSize: 11, color: "#888", fontStyle: "italic", textAlign: "center" }}>
+            {montoEnLetras(invoice.total)}
+          </div>
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
               <div style={{ fontSize: 11, color: "#9a9a9a", marginBottom: 4 }}>Método de pago</div>
@@ -359,7 +394,7 @@ function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => vo
             <span style={{ color: "#bbb", fontSize: 10 }}>Sistema Taller Bonilla</span>
           </div>
         </div>
-        <div style={{ padding: "12px 24px 20px", display: "flex", gap: 10, justifyContent: "flex-end" }}>
+        <div style={{ padding: "12px 24px 20px", display: "flex", gap: 10, justifyContent: "flex-end", position: "relative", zIndex: 1 }}>
           <button onClick={onClose} style={{ background: "#f0f0f0", border: "none", borderRadius: 8, padding: "9px 20px", color: "#555", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Cerrar</button>
           <button onClick={() => window.print()} style={{ background: "#0D0D0F", border: "none", borderRadius: 8, padding: "9px 20px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>

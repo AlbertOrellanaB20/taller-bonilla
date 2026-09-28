@@ -50,7 +50,7 @@ export function DashboardTopBar({
   }, []);
 
   const timeStr = time?.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true }) ?? "";
-  const dateStr = time?.toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" }) ?? "";
+  const dateStr = time?.toLocaleDateString("es-SV", { weekday: "long", day: "numeric", month: "long" }) ?? "";
 
   const menuItemStyle: React.CSSProperties = {
     display: "block",

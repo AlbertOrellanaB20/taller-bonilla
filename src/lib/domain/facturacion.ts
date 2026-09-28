@@ -17,15 +17,31 @@ export interface ReadyOrder {
   completedDate: string;
 }
 
+export interface InvoiceServiceLine {
+  name: string;
+  price: number;
+}
+
+export interface InvoicePartLine {
+  name: string;
+  qty: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
 export interface Invoice {
   id: number;
   number: string;
   orderId: number;
   plate: string;
   model: string;
+  vehicleYear: number;
   client: string;
+  clientDui: string;
   mechanic: string;
   services: string[];
+  serviceLines: InvoiceServiceLine[];
+  partLines: InvoicePartLine[];
   subtotal: number;
   iva: number;
   total: number;
@@ -94,9 +110,10 @@ interface FacturaRow {
   estado_factura: { nombre_estado: string } | null;
   metodo_pago: { nombre_metodo: string } | null;
   orden_servicio: {
-    vehiculo: { placa: string; marca: string; modelo: string; cliente: { nombre_completo: string } | null } | null;
+    vehiculo: { placa: string; marca: string; modelo: string; anio: number; cliente: { nombre_completo: string; dui: string | null } | null } | null;
     empleado: { usuario: { nombre_completo: string } | null } | null;
-    detalle_servicio: { servicio: { nombre_servicio: string } | null }[];
+    detalle_servicio: { precio_aplicado: number; servicio: { nombre_servicio: string } | null }[];
+    detalle_repuesto: { cantidad: number; precio_unitario_aplicado: number; subtotal: number; repuesto: { nombre: string } | null }[];
   } | null;
 }
 
@@ -105,27 +122,40 @@ export async function listFacturas(): Promise<Invoice[]> {
   const { data, error } = await supabase
     .from("factura")
     .select(
-      "id_factura, numero_factura, id_orden_servicio, subtotal, iva, total, fecha_emision, estado_factura:id_estado_factura(nombre_estado), metodo_pago:id_metodo_pago(nombre_metodo), orden_servicio:id_orden_servicio(vehiculo:id_vehiculo(placa, marca, modelo, cliente:id_cliente(nombre_completo)), empleado:id_empleado(usuario:id_usuario(nombre_completo)), detalle_servicio(servicio(nombre_servicio)))",
+      "id_factura, numero_factura, id_orden_servicio, subtotal, iva, total, fecha_emision, estado_factura:id_estado_factura(nombre_estado), metodo_pago:id_metodo_pago(nombre_metodo), orden_servicio:id_orden_servicio(vehiculo:id_vehiculo(placa, marca, modelo, anio, cliente:id_cliente(nombre_completo, dui)), empleado:id_empleado(usuario:id_usuario(nombre_completo)), detalle_servicio(precio_aplicado, servicio(nombre_servicio)), detalle_repuesto(cantidad, precio_unitario_aplicado, subtotal, repuesto(nombre)))",
     )
     .order("id_factura", { ascending: false });
   if (error) throw new Error(error.message);
 
-  return (data as unknown as FacturaRow[]).map((f) => ({
-    id: f.id_factura,
-    number: f.numero_factura,
-    orderId: f.id_orden_servicio,
-    plate: f.orden_servicio?.vehiculo?.placa ?? "—",
-    model: `${f.orden_servicio?.vehiculo?.marca ?? ""} ${f.orden_servicio?.vehiculo?.modelo ?? ""}`.trim(),
-    client: f.orden_servicio?.vehiculo?.cliente?.nombre_completo ?? "—",
-    mechanic: f.orden_servicio?.empleado?.usuario?.nombre_completo ?? "Sin asignar",
-    services: (f.orden_servicio?.detalle_servicio ?? []).map((d) => d.servicio?.nombre_servicio ?? "").filter(Boolean),
-    subtotal: Number(f.subtotal),
-    iva: Number(f.iva),
-    total: Number(f.total),
-    paymentMethod: (f.metodo_pago?.nombre_metodo as PayMethod) ?? "Efectivo",
-    status: (f.estado_factura?.nombre_estado as InvoiceStatus) ?? "Pendiente",
-    date: toDMY(f.fecha_emision),
-  }));
+  return (data as unknown as FacturaRow[]).map((f) => {
+    const serviceLines = (f.orden_servicio?.detalle_servicio ?? [])
+      .filter((d) => d.servicio?.nombre_servicio)
+      .map((d) => ({ name: d.servicio!.nombre_servicio, price: Number(d.precio_aplicado) }));
+    const partLines = (f.orden_servicio?.detalle_repuesto ?? [])
+      .filter((d) => d.repuesto?.nombre)
+      .map((d) => ({ name: d.repuesto!.nombre, qty: d.cantidad, unitPrice: Number(d.precio_unitario_aplicado), subtotal: Number(d.subtotal) }));
+
+    return {
+      id: f.id_factura,
+      number: f.numero_factura,
+      orderId: f.id_orden_servicio,
+      plate: f.orden_servicio?.vehiculo?.placa ?? "—",
+      model: `${f.orden_servicio?.vehiculo?.marca ?? ""} ${f.orden_servicio?.vehiculo?.modelo ?? ""}`.trim(),
+      vehicleYear: f.orden_servicio?.vehiculo?.anio ?? 0,
+      client: f.orden_servicio?.vehiculo?.cliente?.nombre_completo ?? "—",
+      clientDui: f.orden_servicio?.vehiculo?.cliente?.dui ?? "",
+      mechanic: f.orden_servicio?.empleado?.usuario?.nombre_completo ?? "Sin asignar",
+      services: serviceLines.map((s) => s.name),
+      serviceLines,
+      partLines,
+      subtotal: Number(f.subtotal),
+      iva: Number(f.iva),
+      total: Number(f.total),
+      paymentMethod: (f.metodo_pago?.nombre_metodo as PayMethod) ?? "Efectivo",
+      status: (f.estado_factura?.nombre_estado as InvoiceStatus) ?? "Pendiente",
+      date: toDMY(f.fecha_emision),
+    };
+  });
 }
 
 export async function generarFactura(orderId: number, method: PayMethod): Promise<{ number: string }> {

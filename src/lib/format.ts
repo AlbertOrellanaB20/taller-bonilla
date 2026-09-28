@@ -41,3 +41,13 @@ export function fromInputDate(yyyymmdd: string): string {
   const [y, m, d] = yyyymmdd.split("-");
   return `${d}/${m}/${y}`;
 }
+
+/** Días entre dos fechas "dd/mm/yyyy" (para "días estimados de espera"). */
+export function diasEntre(desdeDMY: string, hastaDMY: string): number {
+  const toDate = (dmy: string) => {
+    const [d, m, y] = dmy.split("/").map(Number);
+    return Date.UTC(y, m - 1, d);
+  };
+  const ms = toDate(hastaDMY) - toDate(desdeDMY);
+  return Math.max(0, Math.round(ms / 86_400_000));
+}

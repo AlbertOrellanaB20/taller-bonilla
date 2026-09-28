@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { type ServiceOrder } from "@/lib/domain/ordenes";
-import { toInputDate, fromInputDate } from "@/lib/format";
+import { toInputDate, fromInputDate, diasEntre } from "@/lib/format";
 import { useSecretariaData } from "../context";
 
 const BLANK_VEH = { plate: "", brand: "", model: "", year: new Date().getFullYear(), color: "", mileage: 0, clientId: 0 };
@@ -366,6 +366,12 @@ export default function OrdenesView() {
                     <div style={{ fontSize: 11, color: "#9a9a9a", marginBottom: 2 }}>Entrega estimada</div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#A31212" }}>{comprobante.estimatedDelivery}</div>
                   </div>
+                </div>
+
+                <div style={{ textAlign: "center", background: "rgba(163,18,18,0.06)", border: "1px solid rgba(163,18,18,0.15)", borderRadius: 8, padding: "8px 14px" }}>
+                  <span style={{ fontSize: 12, color: "#A31212", fontWeight: 600 }}>
+                    Tiempo estimado de espera: {diasEntre(comprobante.receivedDate, comprobante.estimatedDelivery)} día{diasEntre(comprobante.receivedDate, comprobante.estimatedDelivery) === 1 ? "" : "s"}
+                  </span>
                 </div>
 
                 <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 12, fontSize: 11, color: "#bbb", textAlign: "center" }}>
