@@ -6,6 +6,7 @@ export interface Supplier {
   id: number;
   name: string;
   phone: string;
+  active: boolean;
 }
 
 export interface Part {
@@ -22,6 +23,7 @@ interface ProveedorRow {
   id_proveedor: number;
   nombre: string;
   telefono: string | null;
+  activo: boolean;
 }
 
 interface RepuestoRow {
@@ -35,7 +37,7 @@ interface RepuestoRow {
 }
 
 function mapProveedor(r: ProveedorRow): Supplier {
-  return { id: r.id_proveedor, name: r.nombre, phone: r.telefono ?? "" };
+  return { id: r.id_proveedor, name: r.nombre, phone: r.telefono ?? "", active: r.activo };
 }
 
 function mapRepuesto(r: RepuestoRow): Part {
@@ -52,7 +54,7 @@ function mapRepuesto(r: RepuestoRow): Part {
 
 export async function listProveedores(): Promise<Supplier[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("proveedor").select("id_proveedor, nombre, telefono").order("nombre");
+  const { data, error } = await supabase.from("proveedor").select("id_proveedor, nombre, telefono, activo").order("nombre");
   if (error) throw new Error(error.message);
   return (data as ProveedorRow[]).map(mapProveedor);
 }
@@ -73,10 +75,16 @@ export async function crearProveedor(name: string, phone: string): Promise<Suppl
   const { data, error } = await supabase
     .from("proveedor")
     .insert({ nombre: name.trim(), telefono: phone.trim() || null })
-    .select("id_proveedor, nombre, telefono")
+    .select("id_proveedor, nombre, telefono, activo")
     .single();
   if (error) throw new Error(error.message);
   return mapProveedor(data as ProveedorRow);
+}
+
+export async function toggleActivoProveedor(id: number, active: boolean): Promise<void> {
+  const supabase = await createClient();
+  const { error } = await supabase.from("proveedor").update({ activo: active }).eq("id_proveedor", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function crearRepuesto(input: Omit<Part, "id">): Promise<Part> {

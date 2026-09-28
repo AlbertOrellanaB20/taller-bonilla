@@ -7,29 +7,37 @@ export interface UsuarioActual {
 }
 
 export async function getUsuarioActual(): Promise<UsuarioActual | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return null;
 
-  const { data } = await supabase
-    .from("usuario")
-    .select("nombre_completo, nombre_usuario, rol:id_rol(nombre_rol)")
-    .eq("auth_user_id", user.id)
-    .maybeSingle<{
-      nombre_completo: string;
-      nombre_usuario: string;
-      rol: { nombre_rol: string } | null;
-    }>();
+    const { data } = await supabase
+      .from("usuario")
+      .select("nombre_completo, nombre_usuario, rol:id_rol(nombre_rol)")
+      .eq("auth_user_id", user.id)
+      .maybeSingle<{
+        nombre_completo: string;
+        nombre_usuario: string;
+        rol: { nombre_rol: string } | null;
+      }>();
 
-  if (!data) return null;
+    if (!data) return null;
 
-  return {
-    nombreCompleto: data.nombre_completo,
-    nombreUsuario: data.nombre_usuario,
-    rol: data.rol?.nombre_rol ?? "",
-  };
+    return {
+      nombreCompleto: data.nombre_completo,
+      nombreUsuario: data.nombre_usuario,
+      rol: data.rol?.nombre_rol ?? "",
+    };
+  } catch (error) {
+    // No pudimos verificar la sesión (Supabase caído, red, etc.): se trata
+    // como "no hay sesión" para que la pantalla redirija a /login con un
+    // mensaje amable, en vez de romperse con un error crudo de servidor.
+    console.error("getUsuarioActual: no se pudo verificar la sesión", error);
+    return null;
+  }
 }
 
 export function initialsFor(name: string): string {

@@ -8,6 +8,7 @@ import {
   crearRepuesto,
   crearProveedor,
   ajustarStock,
+  toggleActivoProveedor,
 } from "@/lib/domain/inventario";
 import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
 
@@ -18,6 +19,7 @@ interface InventarioDataValue {
   openAdjust: (partId: number) => void;
   openNewPart: () => void;
   openNewSupplier: () => void;
+  toggleSupplierActive: (id: number, active: boolean) => Promise<void>;
 }
 
 const InventarioDataContext = createContext<InventarioDataValue | null>(null);
@@ -72,6 +74,15 @@ export function InventarioDataProvider({
     setSuppliers((prev) => [...prev, created]);
   }
 
+  async function toggleSupplierActive(id: number, active: boolean) {
+    setSuppliers((prev) => prev.map((s) => (s.id === id ? { ...s, active } : s)));
+    try {
+      await toggleActivoProveedor(id, active);
+    } catch {
+      setSuppliers((prev) => prev.map((s) => (s.id === id ? { ...s, active: !active } : s)));
+    }
+  }
+
   const adjustPart = parts.find((p) => p.id === adjustId) ?? null;
 
   return (
@@ -83,6 +94,7 @@ export function InventarioDataProvider({
         openAdjust: setAdjustId,
         openNewPart: () => setShowNewPart(true),
         openNewSupplier: () => setShowNewSup(true),
+        toggleSupplierActive,
       }}
     >
       {children}
@@ -226,7 +238,8 @@ function NewPartModal({ suppliers, onClose, onSave }: {
   onClose: () => void;
   onSave: (p: Omit<Part, "id">) => Promise<void>;
 }) {
-  const [form, setForm] = useState({ ...BLANK_PART, supplierId: suppliers[0]?.id ?? 0 });
+  const activeSuppliers = suppliers.filter((s) => s.active);
+  const [form, setForm] = useState({ ...BLANK_PART, supplierId: activeSuppliers[0]?.id ?? 0 });
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -290,7 +303,7 @@ function NewPartModal({ suppliers, onClose, onSave }: {
             <div style={{ position: "relative" }}>
               <select value={form.supplierId} onChange={(e) => setForm((f) => ({ ...f, supplierId: Number(e.target.value) }))} className="db-select">
                 <option value={0} disabled>Seleccionar proveedor...</option>
-                {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {activeSuppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
               <span style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", pointerEvents: "none", color: "#5a5a65", fontSize: 11 }}>▾</span>
             </div>

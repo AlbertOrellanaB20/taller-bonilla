@@ -1,6 +1,7 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { validarCliente } from "@/lib/validation";
 
 export interface Client {
   id: number;
@@ -78,7 +79,9 @@ export async function listVehiculos(): Promise<Vehicle[]> {
 }
 
 export async function crearCliente(input: Omit<Client, "id">): Promise<Client> {
-  if (!input.name.trim()) throw new Error("El nombre del cliente es obligatorio.");
+  const errors = validarCliente(input);
+  const firstError = Object.values(errors)[0];
+  if (firstError) throw new Error(firstError);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("cliente")

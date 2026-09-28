@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState, useEffect, useState } from "react";
-import { login, type LoginState } from "@/lib/actions/auth";
+import { login, logout, type LoginState } from "@/lib/actions/auth";
+import { roleHomePath } from "@/lib/roles";
 
 function GearIcon({ size = 64 }: { size?: number }) {
   return (
@@ -113,12 +114,51 @@ function EyeIcon({ open }: { open: boolean }) {
 
 const initialState: LoginState = {};
 
-function LoginForm() {
+function ActiveSessionDialog({ nombreCompleto, rol }: { nombreCompleto: string; rol: string }) {
+  const [closing, setClosing] = useState(false);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.8)", backdropFilter: "blur(4px)", padding: 16 }}>
+      <div style={{ width: "100%", maxWidth: 400, background: "#212125", borderRadius: 16, border: "1px solid #2a2a2e", boxShadow: "0 24px 80px rgba(0,0,0,0.6)", overflow: "hidden" }}>
+        <div style={{ height: 3, background: "linear-gradient(90deg, #A31212 0%, #7a0d0d 100%)" }} />
+        <div style={{ padding: "28px 28px 24px" }}>
+          <h2 style={{ color: "#f0f0f2", fontSize: 17, fontWeight: 700, margin: 0 }}>Ya tienes una sesión iniciada</h2>
+          <p style={{ color: "#8a8a96", fontSize: 13.5, marginTop: 10, lineHeight: 1.5 }}>
+            Sigues conectado como <strong style={{ color: "#f0f0f2" }}>{nombreCompleto}</strong> ({rol}). ¿Deseas cerrar sesión para iniciar con otro usuario?
+          </p>
+        </div>
+        <div style={{ padding: "0 28px 24px", display: "flex", gap: 10 }}>
+          <a
+            href={roleHomePath(rol)}
+            style={{ flex: 1, textAlign: "center", background: "transparent", border: "1px solid #35353a", borderRadius: 9, padding: "10px 16px", color: "#c0c0c8", fontSize: 13.5, fontWeight: 600, textDecoration: "none" }}
+          >
+            Cancelar
+          </a>
+          <button
+            type="button"
+            disabled={closing}
+            onClick={() => { setClosing(true); logout(); }}
+            style={{ flex: 1, background: "#A31212", border: "none", borderRadius: 9, padding: "10px 16px", color: "#fff", fontSize: 13.5, fontWeight: 600, cursor: closing ? "default" : "pointer", opacity: closing ? 0.7 : 1 }}
+          >
+            {closing ? "Cerrando..." : "Cerrar sesión"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoginForm({ aviso }: { aviso?: string }) {
   const [state, formAction, pending] = useActionState(login, initialState);
   const [showPassword, setShowPassword] = useState(false);
 
   return (
     <form action={formAction} style={{ width: "100%" }}>
+      {aviso === "session_error" && (
+        <div className="animate-in-1" style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)", borderRadius: 8, padding: "10px 14px", marginBottom: 20, color: "#facc15", fontSize: 13 }}>
+          No pudimos verificar tu sesión anterior. Por favor, inicia sesión de nuevo.
+        </div>
+      )}
       <div className="animate-in-1">
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
           <div style={{ width: 3, height: 24, background: "#A31212", borderRadius: 2 }} />
@@ -178,7 +218,12 @@ function LoginForm() {
   );
 }
 
-export default function LoginScreen() {
+interface LoginScreenProps {
+  activeSession: { nombreCompleto: string; rol: string } | null;
+  aviso?: string;
+}
+
+export default function LoginScreen({ activeSession, aviso }: LoginScreenProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     const raf = requestAnimationFrame(() => setMounted(true));
@@ -209,9 +254,11 @@ export default function LoginScreen() {
       <div className="form-panel" style={{ flex: 1, minHeight: "100vh", background: "#1C1C1F", display: "flex", alignItems: "center", justifyContent: "center", padding: "48px 24px" }}>
         <div className="form-card" style={{ width: "100%", maxWidth: 420, background: "#212125", borderRadius: 18, border: "1px solid #2a2a2e", boxShadow: "0 24px 80px rgba(0,0,0,0.5), 0 4px 24px rgba(0,0,0,0.3)", padding: "40px 36px", opacity: mounted ? 1 : 0, transition: "opacity 0.3s ease" }}>
           <div style={{ height: 3, background: "linear-gradient(90deg, #A31212 0%, #7a0d0d 100%)", borderRadius: "2px 2px 0 0", margin: "-40px -36px 36px -36px" }} />
-          <LoginForm />
+          <LoginForm aviso={aviso} />
         </div>
       </div>
+
+      {activeSession && <ActiveSessionDialog nombreCompleto={activeSession.nombreCompleto} rol={activeSession.rol} />}
     </div>
   );
 }

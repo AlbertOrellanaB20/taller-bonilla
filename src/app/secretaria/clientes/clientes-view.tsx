@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSecretariaData } from "../context";
+import { validarCliente, formatTelefono, formatDui, NOMBRE_MAX, DIRECCION_MAX } from "@/lib/validation";
 
 const BLANK = { name: "", phone: "", address: "", dui: "" };
 
@@ -9,6 +10,7 @@ export default function ClientesView() {
   const { clients, vehicles, addClient } = useSecretariaData();
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(BLANK);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,12 +23,20 @@ export default function ClientesView() {
     return vehicles.filter((v) => v.clientId === clientId).length;
   }
 
+  function updateField(key: keyof typeof BLANK, raw: string) {
+    const value = key === "phone" ? formatTelefono(raw) : key === "dui" ? formatDui(raw) : raw;
+    setForm((f) => ({ ...f, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
   async function handleSave() {
-    if (!form.name.trim()) return;
+    const errors = validarCliente(form);
+    if (Object.keys(errors).length > 0) { setFieldErrors(errors); return; }
     setError(null);
     try {
       await addClient(form);
       setForm(BLANK);
+      setFieldErrors({});
       setSaved(true);
       setTimeout(() => { setSaved(false); setModal(false); }, 1800);
     } catch (e) {
@@ -34,10 +44,20 @@ export default function ClientesView() {
     }
   }
 
-  const field = (label: string, key: keyof typeof BLANK, placeholder: string) => (
+  const field = (label: string, key: keyof typeof BLANK, placeholder: string, opts?: { maxLength?: number; required?: boolean }) => (
     <div>
-      <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase" as const, letterSpacing: "0.06em" }}>{label}</label>
-      <input className="db-input" placeholder={placeholder} value={form[key]} onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))} />
+      <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase" as const, letterSpacing: "0.06em" }}>
+        {label}{opts?.required && <span style={{ color: "#f87171" }}> *</span>}
+      </label>
+      <input
+        className="db-input"
+        placeholder={placeholder}
+        value={form[key]}
+        maxLength={opts?.maxLength}
+        onChange={(e) => updateField(key, e.target.value)}
+        style={fieldErrors[key] ? { borderColor: "#ef4444" } : undefined}
+      />
+      {fieldErrors[key] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors[key]}</p>}
     </div>
   );
 
@@ -56,7 +76,7 @@ export default function ClientesView() {
           <h1 style={{ color: "#f0f0f2", fontSize: 20, fontWeight: 700, margin: 0 }}>Clientes</h1>
           <p style={{ color: "#5a5a65", fontSize: 13, margin: "2px 0 0" }}>{clients.length} clientes registrados</p>
         </div>
-        <button onClick={() => { setModal(true); setSaved(false); setForm(BLANK); }}
+        <button onClick={() => { setModal(true); setSaved(false); setForm(BLANK); setFieldErrors({}); setError(null); }}
           style={{ background: "#A31212", border: "none", borderRadius: 9, padding: "10px 18px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all .2s" }}
           onMouseEnter={(e) => { e.currentTarget.style.background = "#c01515"; e.currentTarget.style.boxShadow = "0 0 16px rgba(163,18,18,.4)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "#A31212"; e.currentTarget.style.boxShadow = "none"; }}>
@@ -130,10 +150,10 @@ export default function ClientesView() {
             </div>
 
             <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 16 }}>
-              {field("Nombre completo", "name", "Ej: Juan Alberto Pérez")}
-              {field("Teléfono", "phone", "Ej: 7123-4567")}
-              {field("Dirección", "address", "Ej: Col. Escalón, San Salvador")}
-              {field("DUI", "dui", "Ej: 01234567-8")}
+              {field("Nombre completo", "name", "Ej: Juan Alberto Pérez", { maxLength: NOMBRE_MAX, required: true })}
+              {field("Teléfono", "phone", "Ej: 7123-4567", { maxLength: 9, required: true })}
+              {field("Dirección", "address", "Ej: Col. Escalón, San Salvador", { maxLength: DIRECCION_MAX })}
+              {field("DUI", "dui", "Ej: 01234567-8", { maxLength: 10 })}
               {error && (
                 <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
                   {error}

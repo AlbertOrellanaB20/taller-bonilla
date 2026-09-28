@@ -4,7 +4,7 @@ import { IconTruck } from "@/components/dashboard/icons";
 import { useInventarioData } from "../context";
 
 export default function ProveedoresView() {
-  const { suppliers, parts, openNewSupplier } = useInventarioData();
+  const { suppliers, parts, openNewSupplier, toggleSupplierActive } = useInventarioData();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 900 }}>
@@ -38,13 +38,15 @@ export default function ProveedoresView() {
                 <th>Nombre</th>
                 <th>Teléfono</th>
                 <th>Repuestos suministrados</th>
+                <th>Estado</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody>
               {suppliers.map((s, i) => {
                 const count = parts.filter((p) => p.supplierId === s.id).length;
                 return (
-                  <tr key={s.id}>
+                  <tr key={s.id} style={{ opacity: s.active ? 1 : 0.55 }}>
                     <td style={{ color: "#5a5a65", fontSize: 12 }}>{i + 1}</td>
                     <td style={{ color: "#f0f0f2", fontWeight: 600 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -59,6 +61,20 @@ export default function ProveedoresView() {
                       <span style={{ background: count > 0 ? "rgba(139,92,246,0.1)" : "rgba(255,255,255,0.05)", color: count > 0 ? "#a78bfa" : "#5a5a65", fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 20 }}>
                         {count} {count === 1 ? "repuesto" : "repuestos"}
                       </span>
+                    </td>
+                    <td>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: s.active ? "#22c55e" : "#ef4444", flexShrink: 0 }} />
+                        <span style={{ color: s.active ? "#4ade80" : "#f87171", fontSize: 12, fontWeight: 500 }}>{s.active ? "Activo" : "Inactivo"}</span>
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => toggleSupplierActive(s.id, !s.active)}
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2e", borderRadius: 6, padding: "5px 11px", color: "#8a8a96", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                      >
+                        {s.active ? "Desactivar" : "Activar"}
+                      </button>
                     </td>
                   </tr>
                 );
