@@ -264,30 +264,27 @@ ALTER TABLE servicio ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "servicio_lectura_autenticados" ON servicio
 FOR SELECT USING (auth.role() = 'authenticated');
 
--- Función helper: obtiene el rol del usuario autenticado actual
+-- Función helper: obtiene el rol del usuario autenticado actual.
+-- SECURITY DEFINER es obligatorio aquí: esta función lee de `usuario`,
+-- y `usuario` tiene sus propias políticas de RLS que llaman a esta misma
+-- función (más abajo, en database/rls_politicas.sql) — sin SECURITY
+-- DEFINER, evaluar una política dispara la otra en un ciclo infinito
+-- ("stack depth limit exceeded" en cualquier consulta un poco más real
+-- que leer tu propia fila). Con SECURITY DEFINER, esta función se salta
+-- el RLS de `usuario` solo para su propia lectura interna, sin exponer
+-- nada de otros usuarios (sigue filtrando por auth.uid()).
 CREATE OR REPLACE FUNCTION fn_rol_actual()
 RETURNS TEXT AS $$
     SELECT r.nombre_rol FROM usuario u
     JOIN rol r ON r.id_rol = u.id_rol
     WHERE u.auth_user_id = auth.uid()
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
--- Cada usuario puede leer su propia fila en `usuario`. Es indispensable:
--- sin esto, después de iniciar sesión la app no puede saber qué rol tiene
--- el usuario (el login y el proxy/middleware de rutas dependen de esto).
-CREATE POLICY "usuario_lee_su_propia_fila" ON usuario
-FOR SELECT USING (auth_user_id = auth.uid());
-
--- El Administrador tiene control total sobre la tabla de usuarios.
-CREATE POLICY "usuario_admin_control_total" ON usuario
-FOR ALL USING (fn_rol_actual() = 'Administrador')
-WITH CHECK (fn_rol_actual() = 'Administrador');
-
--- Solo Administrador y Secretario/a pueden ver todas las facturas
--- (nombre de rol corregido: antes decía 'Cajero', que ya no existe en la
--- tabla `rol` — el rol final se llama 'Secretario/a', ver sección 6 arriba).
-CREATE POLICY "facturas_admin_secretaria" ON factura
-FOR SELECT USING (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+-- Las políticas de RLS de usuario/empleado/cliente/vehiculo/orden_servicio/
+-- detalle_servicio/proveedor/repuesto/detalle_repuesto/factura viven en
+-- database/rls_politicas.sql (un solo archivo, para no mantener las
+-- políticas duplicadas en dos lugares que se puedan desincronizar).
+-- Corre ese archivo completo justo después de este.
 
 -- 9. REALTIME: habilitar para que los cambios se reflejen en vivo en el frontend
 ALTER PUBLICATION supabase_realtime ADD TABLE orden_servicio;
@@ -306,6 +303,11 @@ ALTER PUBLICATION supabase_realtime ADD TABLE repuesto;
 -- Figma ya la usa — "servicesDone" — pero la tabla original no la tenía).
 ALTER TABLE detalle_servicio ADD COLUMN IF NOT EXISTS completado BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- 10.1.1 Columna nueva: permite desactivar un proveedor sin borrarlo (lo
+-- usa Inventario). Un proveedor inactivo no debe aparecer al registrar
+-- un repuesto nuevo — eso lo filtra la app, no la base de datos.
+ALTER TABLE proveedor ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE;
+
 -- 10.2 Numeración automática de facturas (FAC-0001, FAC-0002, ...). Con esto
 -- el número de factura ya no se calcula en el frontend: Postgres lo asigna
 -- solo, de forma segura aunque dos personas facturen al mismo tiempo.
@@ -313,14 +315,16 @@ CREATE SEQUENCE IF NOT EXISTS factura_numero_seq START 1;
 ALTER TABLE factura ALTER COLUMN numero_factura SET DEFAULT ('FAC-' || lpad(nextval('factura_numero_seq')::text, 4, '0'));
 
 -- 10.3 Función helper: id_empleado del usuario autenticado actual (o NULL si
--- no es empleado). La usan las políticas de RLS de abajo para que un
--- Mecánico solo pueda ver/tocar SUS propias órdenes asignadas.
+-- no es empleado). La usan las políticas de RLS de database/rls_politicas.sql
+-- para que un Mecánico solo pueda ver/tocar SUS propias órdenes asignadas.
+-- SECURITY DEFINER por la misma razón que fn_rol_actual() (sección 8):
+-- sin esto, cae en el mismo ciclo infinito de RLS al leer `empleado`/`usuario`.
 CREATE OR REPLACE FUNCTION fn_empleado_actual()
 RETURNS INT AS $$
     SELECT e.id_empleado FROM empleado e
     JOIN usuario u ON u.id_usuario = e.id_usuario
     WHERE u.auth_user_id = auth.uid()
-$$ LANGUAGE sql STABLE;
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
 -- 10.4 Las funciones que descuentan stock y recalculan el total de la orden
 -- se marcan SECURITY DEFINER: así, cuando un Mecánico agrega un repuesto a
@@ -420,123 +424,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- 10.6 RLS completa: las tablas que faltaban (estaban abiertas a cualquier
--- usuario autenticado sin ninguna política — CLAUDE.md exige RLS en TODAS).
-
-ALTER TABLE empleado ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "empleado_admin_control_total" ON empleado
-FOR ALL USING (fn_rol_actual() = 'Administrador') WITH CHECK (fn_rol_actual() = 'Administrador');
-CREATE POLICY "empleado_supervisora_lectura" ON empleado
-FOR SELECT USING (fn_rol_actual() = 'Supervisora');
-CREATE POLICY "empleado_lee_su_propia_fila" ON empleado
-FOR SELECT USING (id_usuario = (SELECT id_usuario FROM usuario WHERE auth_user_id = auth.uid()));
-
-CREATE POLICY "usuario_lectura_supervisora" ON usuario
-FOR SELECT USING (fn_rol_actual() = 'Supervisora');
-
-ALTER TABLE cliente ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "cliente_admin_secretaria_control_total" ON cliente
-FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
-CREATE POLICY "cliente_lectura_relacionada" ON cliente
-FOR SELECT USING (
-    fn_rol_actual() = 'Supervisora'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM vehiculo v JOIN orden_servicio os ON os.id_vehiculo = v.id_vehiculo
-        WHERE v.id_cliente = cliente.id_cliente AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-
-ALTER TABLE vehiculo ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "vehiculo_admin_secretaria_control_total" ON vehiculo
-FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
-CREATE POLICY "vehiculo_lectura_relacionada" ON vehiculo
-FOR SELECT USING (
-    fn_rol_actual() = 'Supervisora'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_vehiculo = vehiculo.id_vehiculo AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-
--- orden_servicio tenía RLS activado desde la sección 8 pero SIN ninguna
--- política — eso la dejaba inaccesible para todo el mundo. Estas son las
--- políticas reales según la tabla de permisos de CLAUDE.md.
-CREATE POLICY "orden_servicio_lectura" ON orden_servicio
-FOR SELECT USING (
-    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
-    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
-);
-CREATE POLICY "orden_servicio_creacion" ON orden_servicio
-FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
-CREATE POLICY "orden_servicio_actualizacion" ON orden_servicio
-FOR UPDATE USING (
-    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
-    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
-) WITH CHECK (
-    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
-    OR (fn_rol_actual() = 'Mecánico' AND id_empleado = fn_empleado_actual())
-);
-
-ALTER TABLE detalle_servicio ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "detalle_servicio_lectura" ON detalle_servicio
-FOR SELECT USING (
-    fn_rol_actual() IN ('Administrador', 'Secretario/a', 'Supervisora')
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-CREATE POLICY "detalle_servicio_creacion" ON detalle_servicio
-FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
-CREATE POLICY "detalle_servicio_borra" ON detalle_servicio
-FOR DELETE USING (fn_rol_actual() = 'Administrador');
-CREATE POLICY "detalle_servicio_mecanico_marca_completado" ON detalle_servicio
-FOR UPDATE USING (
-    fn_rol_actual() = 'Administrador'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-) WITH CHECK (
-    fn_rol_actual() = 'Administrador'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_servicio.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-
-ALTER TABLE proveedor ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "proveedor_admin_inventario_control_total" ON proveedor
-FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Inventario')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Inventario'));
-
-ALTER TABLE repuesto ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "repuesto_admin_inventario_control_total" ON repuesto
-FOR ALL USING (fn_rol_actual() IN ('Administrador', 'Inventario')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Inventario'));
-CREATE POLICY "repuesto_lectura_mecanico" ON repuesto
-FOR SELECT USING (fn_rol_actual() = 'Mecánico');
-
-ALTER TABLE detalle_repuesto ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "detalle_repuesto_lectura" ON detalle_repuesto
-FOR SELECT USING (
-    fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a', 'Inventario')
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-CREATE POLICY "detalle_repuesto_escribe" ON detalle_repuesto
-FOR INSERT WITH CHECK (
-    fn_rol_actual() = 'Administrador'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-CREATE POLICY "detalle_repuesto_borra" ON detalle_repuesto
-FOR DELETE USING (
-    fn_rol_actual() = 'Administrador'
-    OR (fn_rol_actual() = 'Mecánico' AND EXISTS (
-        SELECT 1 FROM orden_servicio os WHERE os.id_orden_servicio = detalle_repuesto.id_orden_servicio AND os.id_empleado = fn_empleado_actual()
-    ))
-);
-
--- factura tenía RLS activado y solo una política de lectura — le faltaban
--- las de creación/actualización (generar factura, marcar pagada, anular).
-CREATE POLICY "facturas_admin_secretaria_creacion" ON factura
-FOR INSERT WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
-CREATE POLICY "facturas_admin_secretaria_actualizacion" ON factura
-FOR UPDATE USING (fn_rol_actual() IN ('Administrador', 'Secretario/a')) WITH CHECK (fn_rol_actual() IN ('Administrador', 'Secretario/a'));
+-- 10.6 RLS completa por tabla (empleado, cliente, vehiculo, orden_servicio,
+-- detalle_servicio, proveedor, repuesto, detalle_repuesto, factura, y los
+-- ajustes a usuario) — todo eso vive en database/rls_politicas.sql, un solo
+-- archivo con todas las políticas (evita mantenerlas duplicadas en dos
+-- lugares). Corre ese archivo completo justo después de este.
