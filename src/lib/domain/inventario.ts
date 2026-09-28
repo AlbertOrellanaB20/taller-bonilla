@@ -118,7 +118,13 @@ export async function listRepuestosMasUsadosMes(): Promise<UsoRepuesto[]> {
   // select con join directo — de lo contrario RLS anula el lado de la orden
   // y el widget sale vacío siempre. Ver database/rls_politicas.sql, sección 11.
   const { data, error } = await supabase.rpc("fn_repuestos_mas_usados_mes");
-  if (error) throw new Error(error.message);
+  // No se rompe el Dashboard si todavía no se ha corrido la función nueva en
+  // Supabase (o si falla por cualquier otra razón) — solo se ve vacía esta
+  // tarjeta en particular, nunca toda la pantalla.
+  if (error) {
+    console.error("fn_repuestos_mas_usados_mes:", error.message);
+    return [];
+  }
   return (data as { nombre: string; usado: number }[]).map((d) => ({ name: d.nombre, used: Number(d.usado) }));
 }
 
