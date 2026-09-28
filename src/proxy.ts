@@ -8,7 +8,11 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // sw.js queda afuera a propósito: es el script del service worker (PWA) y
+  // los navegadores rechazan instalar uno cuyo archivo llega por una
+  // redirección — si el proxy lo intercepta y no hay sesión, lo manda a
+  // /login y el navegador tira "script resource is behind a redirect".
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw\\.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };
