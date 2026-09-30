@@ -13,7 +13,8 @@ interface Props {
 }
 
 export function InventarioShell({ navItems, displayName, initials, children }: Props) {
-  const { criticalCount } = useInventarioData();
+  const { criticalParts } = useInventarioData();
+  const notifications = criticalParts.map((p) => ({ id: p.id, text: `${p.name}: ${p.stock}/${p.minStock} mín.`, href: "/inventario/repuestos" }));
 
   return (
     <DashboardShell
@@ -27,7 +28,9 @@ export function InventarioShell({ navItems, displayName, initials, children }: P
       accentColor="#a78bfa"
       activeBg="rgba(139,92,246,0.15)"
       sidebarWidth={200}
-      notificationCount={criticalCount}
+      notificationCount={notifications.length}
+      notifications={notifications}
+      profileHref="/inventario/perfil"
     >
       {children}
     </DashboardShell>

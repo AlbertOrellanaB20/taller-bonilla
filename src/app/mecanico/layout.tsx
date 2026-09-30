@@ -18,7 +18,8 @@ export default async function MecanicoLayout({ children }: { children: ReactNode
   if (!usuario) redirect("/login");
 
   const [orders, partsCatalog] = await Promise.all([listOrdenesMecanico(), listRepuestos()]);
-  const pendientesOEnProceso = orders.filter((o) => o.status === "Pendiente" || o.status === "En Proceso").length;
+  const activas = orders.filter((o) => o.status === "Pendiente" || o.status === "En Proceso");
+  const notifications = activas.map((o) => ({ id: o.id, text: `${o.plate} — ${o.status} (entrega ${o.dueDate})`, href: "/mecanico/ordenes" }));
 
   return (
     <DashboardShell
@@ -30,7 +31,9 @@ export default async function MecanicoLayout({ children }: { children: ReactNode
       badgeColor="#4ade80"
       avatarGradient="linear-gradient(135deg, #166534 0%, #14532d 100%)"
       sidebarWidth={200}
-      notificationCount={pendientesOEnProceso}
+      notificationCount={notifications.length}
+      notifications={notifications}
+      profileHref="/mecanico/perfil"
     >
       <MecanicoDataProvider initialOrders={orders} partsCatalog={partsCatalog}>
         {children}

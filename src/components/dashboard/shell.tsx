@@ -4,6 +4,12 @@ import { useState, type ReactNode } from "react";
 import { DashboardSidebar, type NavItem } from "./sidebar";
 import { DashboardTopBar } from "./topbar";
 
+export interface NotificationItem {
+  id: string | number;
+  text: string;
+  href?: string;
+}
+
 interface DashboardShellProps {
   navItems: NavItem[];
   roleLabel: string;
@@ -16,6 +22,7 @@ interface DashboardShellProps {
   activeBg?: string;
   sidebarWidth?: number;
   notificationCount?: number;
+  notifications?: NotificationItem[];
   profileHref?: string;
   children: ReactNode;
 }
@@ -32,6 +39,7 @@ export function DashboardShell({
   activeBg,
   sidebarWidth,
   notificationCount,
+  notifications,
   profileHref,
   children,
 }: DashboardShellProps) {
@@ -67,6 +75,7 @@ export function DashboardShell({
           initials={initials}
           onMenuToggle={() => setSidebarOpen((v) => !v)}
           notificationCount={notificationCount}
+          notifications={notifications}
           profileHref={profileHref}
         />
         <main style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>{children}</main>

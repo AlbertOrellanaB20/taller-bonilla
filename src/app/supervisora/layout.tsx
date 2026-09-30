@@ -18,7 +18,12 @@ export default async function SupervisoraLayout({ children }: { children: ReactN
   if (!usuario) redirect("/login");
 
   const orders = await listOrdenesSupervisora();
-  const pendingAssign = orders.filter((o) => o.mechanicId === null && o.status !== "Entregado").length;
+  const sinAsignar = orders.filter((o) => o.mechanicId === null && o.status !== "Entregado");
+  const retrasadas = orders.filter((o) => o.overdue);
+  const notifications = [
+    ...sinAsignar.map((o) => ({ id: `sa-${o.id}`, text: `Sin asignar: ${o.plate} — ${o.client}`, href: "/supervisora/ordenes" })),
+    ...retrasadas.map((o) => ({ id: `rt-${o.id}`, text: `Retrasada: ${o.plate} — ${o.client}`, href: "/supervisora/ordenes" })),
+  ];
 
   return (
     <DashboardShell
@@ -29,7 +34,9 @@ export default async function SupervisoraLayout({ children }: { children: ReactN
       badgeBg="#b45309"
       avatarGradient="linear-gradient(135deg, #b45309 0%, #92400e 100%)"
       sidebarWidth={240}
-      notificationCount={pendingAssign}
+      notificationCount={notifications.length}
+      notifications={notifications}
+      profileHref="/supervisora/perfil"
     >
       {children}
     </DashboardShell>

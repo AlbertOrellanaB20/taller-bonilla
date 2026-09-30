@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { logout } from "@/lib/actions/auth";
 import { IconBell, IconMenu } from "./icons";
+import type { NotificationItem } from "./shell";
 
 interface TopBarProps {
   displayName: string;
@@ -14,7 +15,8 @@ interface TopBarProps {
   initials: string;
   onMenuToggle: () => void;
   notificationCount?: number;
-  /** Si se pasa, "Mi perfil" navega ahí (solo Administrador lo usa hoy). */
+  notifications?: NotificationItem[];
+  /** Si se pasa, "Mi perfil" navega ahí. */
   profileHref?: string;
 }
 
@@ -27,11 +29,14 @@ export function DashboardTopBar({
   initials,
   onMenuToggle,
   notificationCount = 0,
+  notifications = [],
   profileHref,
 }: TopBarProps) {
   const [time, setTime] = useState<Date | null>(null);
   const [avatarOpen, setAvatarOpen] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
   const avatarRef = useRef<HTMLDivElement>(null);
+  const bellRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setTime(new Date()));
@@ -43,6 +48,9 @@ export function DashboardTopBar({
     function handler(e: MouseEvent) {
       if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
         setAvatarOpen(false);
+      }
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false);
       }
     }
     document.addEventListener("mousedown", handler);
@@ -93,18 +101,44 @@ export function DashboardTopBar({
         <div style={{ color: "#5a5a65", fontSize: 10, textTransform: "capitalize" }}>{dateStr}</div>
       </div>
 
-      <button
-        style={{ position: "relative", background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2e", borderRadius: 8, padding: "7px 8px", cursor: "pointer", color: "#8a8a96", display: "flex", alignItems: "center", transition: "all 0.15s", flexShrink: 0 }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(163,18,18,0.1)"; e.currentTarget.style.color = "#A31212"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#8a8a96"; }}
-      >
-        <IconBell />
-        {notificationCount > 0 && (
-          <span style={{ position: "absolute", top: 4, right: 4, width: 16, height: 16, background: "#A31212", borderRadius: "50%", fontSize: 9, fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {notificationCount}
-          </span>
+      <div ref={bellRef} style={{ position: "relative", flexShrink: 0 }}>
+        <button
+          onClick={() => setBellOpen((v) => !v)}
+          style={{ position: "relative", background: "rgba(255,255,255,0.04)", border: "1px solid #2a2a2e", borderRadius: 8, padding: "7px 8px", cursor: "pointer", color: "#8a8a96", display: "flex", alignItems: "center", transition: "all 0.15s" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(163,18,18,0.1)"; e.currentTarget.style.color = "#A31212"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "#8a8a96"; }}
+        >
+          <IconBell />
+          {notificationCount > 0 && (
+            <span style={{ position: "absolute", top: 4, right: 4, width: 16, height: 16, background: "#A31212", borderRadius: "50%", fontSize: 9, fontWeight: 700, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {notificationCount}
+            </span>
+          )}
+        </button>
+
+        {bellOpen && (
+          <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 300, maxHeight: 360, overflowY: "auto", background: "#212125", border: "1px solid #2a2a2e", borderRadius: 10, boxShadow: "0 8px 32px rgba(0,0,0,0.5)", overflow: "hidden", zIndex: 100 }}>
+            <div style={{ padding: "10px 14px", borderBottom: "1px solid #2a2a2e", color: "#f0f0f2", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+              Alertas {notificationCount > 0 ? `(${notificationCount})` : ""}
+            </div>
+            {notifications.length === 0 ? (
+              <div style={{ padding: "18px 14px", color: "#5a5a65", fontSize: 12, textAlign: "center" }}>No hay alertas por ahora.</div>
+            ) : (
+              notifications.map((n) =>
+                n.href ? (
+                  <Link key={n.id} href={n.href} onClick={() => setBellOpen(false)} style={{ ...menuItemStyle, borderBottom: "1px solid #1e1e22" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(255,255,255,0.05)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                    {n.text}
+                  </Link>
+                ) : (
+                  <div key={n.id} style={{ ...menuItemStyle, borderBottom: "1px solid #1e1e22", cursor: "default" }}>{n.text}</div>
+                ),
+              )
+            )}
+          </div>
         )}
-      </button>
+      </div>
 
       <div ref={avatarRef} style={{ position: "relative", flexShrink: 0 }}>
         <button

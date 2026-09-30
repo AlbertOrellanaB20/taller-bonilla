@@ -29,6 +29,7 @@ export default async function SecretariaLayout({ children }: { children: ReactNo
     listFacturas(),
     listServiciosCatalogo(),
   ]);
+  const notifications = readyOrders.map((o) => ({ id: o.id, text: `Lista para facturar: ${o.plate} — ${o.client}`, href: "/secretaria/facturacion" }));
 
   return (
     <DashboardShell
@@ -39,7 +40,9 @@ export default async function SecretariaLayout({ children }: { children: ReactNo
       badgeBg="#1d4ed8"
       avatarGradient="linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%)"
       sidebarWidth={210}
-      notificationCount={readyOrders.length}
+      notificationCount={notifications.length}
+      notifications={notifications}
+      profileHref="/secretaria/perfil"
     >
       <SecretariaDataProvider
         initialClients={clients}

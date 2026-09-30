@@ -49,6 +49,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
     listRepuestos(),
     listProveedores(),
   ]);
+  const notifications = readyOrders.map((o) => ({ id: o.id, text: `Lista para facturar: ${o.plate} — ${o.client}`, href: "/admin/facturacion" }));
 
   return (
     <DashboardShell
@@ -59,8 +60,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       badgeBg="#A31212"
       avatarGradient="linear-gradient(135deg, #A31212 0%, #7a0d0d 100%)"
       sidebarWidth={240}
-      notificationCount={readyOrders.length}
-      profileHref="/admin/usuarios"
+      notificationCount={notifications.length}
+      notifications={notifications}
+      profileHref="/admin/perfil"
     >
       <SecretariaDataProvider
         initialClients={clients}

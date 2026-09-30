@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 export interface UsuarioActual {
   nombreCompleto: string;
   nombreUsuario: string;
+  correo: string;
   rol: string;
 }
 
@@ -16,11 +17,12 @@ export async function getUsuarioActual(): Promise<UsuarioActual | null> {
 
     const { data } = await supabase
       .from("usuario")
-      .select("nombre_completo, nombre_usuario, rol:id_rol(nombre_rol)")
+      .select("nombre_completo, nombre_usuario, correo, rol:id_rol(nombre_rol)")
       .eq("auth_user_id", user.id)
       .maybeSingle<{
         nombre_completo: string;
         nombre_usuario: string;
+        correo: string;
         rol: { nombre_rol: string } | null;
       }>();
 
@@ -29,6 +31,7 @@ export async function getUsuarioActual(): Promise<UsuarioActual | null> {
     return {
       nombreCompleto: data.nombre_completo,
       nombreUsuario: data.nombre_usuario,
+      correo: data.correo,
       rol: data.rol?.nombre_rol ?? "",
     };
   } catch (error) {
