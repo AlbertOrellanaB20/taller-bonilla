@@ -1,7 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { validarCliente } from "@/lib/validation";
+import { validarCliente, validarVehiculo } from "@/lib/validation";
+import { type Result, ok, fail } from "@/lib/result";
 
 export interface Client {
   id: number;
@@ -9,6 +10,7 @@ export interface Client {
   phone: string;
   address: string;
   dui: string;
+  email: string;
 }
 
 export interface Vehicle {
@@ -28,6 +30,7 @@ interface ClienteRow {
   telefono: string;
   direccion: string | null;
   dui: string | null;
+  correo: string | null;
 }
 
 interface VehiculoRow {
@@ -42,7 +45,7 @@ interface VehiculoRow {
 }
 
 function mapCliente(r: ClienteRow): Client {
-  return { id: r.id_cliente, name: r.nombre_completo, phone: r.telefono, address: r.direccion ?? "", dui: r.dui ?? "" };
+  return { id: r.id_cliente, name: r.nombre_completo, phone: r.telefono, address: r.direccion ?? "", dui: r.dui ?? "", email: r.correo ?? "" };
 }
 
 function mapVehiculo(r: VehiculoRow): Vehicle {
@@ -62,7 +65,7 @@ export async function listClientes(): Promise<Client[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("cliente")
-    .select("id_cliente, nombre_completo, telefono, direccion, dui")
+    .select("id_cliente, nombre_completo, telefono, direccion, dui, correo")
     .order("nombre_completo");
   if (error) throw new Error(error.message);
   return (data as ClienteRow[]).map(mapCliente);
@@ -78,10 +81,17 @@ export async function listVehiculos(): Promise<Vehicle[]> {
   return (data as VehiculoRow[]).map(mapVehiculo);
 }
 
-export async function crearCliente(input: Omit<Client, "id">): Promise<Client> {
+/**
+ * Devuelve { ok: false, error } en vez de lanzar `throw` para los fallos
+ * esperados (validación, restricciones de la base de datos como DUI
+ * duplicado). Next.js redacta el mensaje de cualquier error lanzado dentro
+ * de una Server Action en producción (queda un "Minified React error #441"
+ * sin mensaje útil) — ver src/lib/result.ts para el detalle completo.
+ */
+export async function crearCliente(input: Omit<Client, "id">): Promise<Result<Client>> {
   const errors = validarCliente(input);
   const firstError = Object.values(errors)[0];
-  if (firstError) throw new Error(firstError);
+  if (firstError) return fail(firstError);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("cliente")
@@ -90,15 +100,18 @@ export async function crearCliente(input: Omit<Client, "id">): Promise<Client> {
       telefono: input.phone.trim(),
       direccion: input.address.trim() || null,
       dui: input.dui.trim() || null,
+      correo: input.email.trim() || null,
     })
-    .select("id_cliente, nombre_completo, telefono, direccion, dui")
+    .select("id_cliente, nombre_completo, telefono, direccion, dui, correo")
     .single();
-  if (error) throw new Error(error.message);
-  return mapCliente(data as ClienteRow);
+  if (error) return fail(error.message);
+  return ok(mapCliente(data as ClienteRow));
 }
 
-export async function crearVehiculo(input: Omit<Vehicle, "id">): Promise<Vehicle> {
-  if (!input.plate.trim() || !input.brand.trim()) throw new Error("Placa y marca son obligatorias.");
+export async function crearVehiculo(input: Omit<Vehicle, "id">): Promise<Result<Vehicle>> {
+  const errors = validarVehiculo(input);
+  const firstError = Object.values(errors)[0];
+  if (firstError) return fail(firstError);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("vehiculo")
@@ -113,6 +126,6 @@ export async function crearVehiculo(input: Omit<Vehicle, "id">): Promise<Vehicle
     })
     .select("id_vehiculo, placa, marca, modelo, anio, color, kilometraje, id_cliente")
     .single();
-  if (error) throw new Error(error.message);
-  return mapVehiculo(data as VehiculoRow);
+  if (error) return fail(error.message);
+  return ok(mapVehiculo(data as VehiculoRow));
 }

@@ -10,6 +10,7 @@ import {
 } from "@/lib/domain/ordenes";
 import type { Part } from "@/lib/domain/inventario";
 import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
+import { unwrap } from "@/lib/result";
 import { STATUS_STYLE } from "./lib/data";
 
 interface MecanicoDataValue {
@@ -58,7 +59,7 @@ export function MecanicoDataProvider({
   }
 
   async function addPart(orderId: number, repuestoId: number, qty: number) {
-    await agregarRepuestoAOrden(orderId, repuestoId, qty);
+    unwrap(await agregarRepuestoAOrden(orderId, repuestoId, qty));
     await refetch();
   }
 

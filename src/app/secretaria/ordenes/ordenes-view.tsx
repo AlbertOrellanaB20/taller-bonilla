@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { type ServiceOrder } from "@/lib/domain/ordenes";
 import { toInputDate, fromInputDate, diasEntre } from "@/lib/format";
+import { validarCliente, validarVehiculo, formatTelefono, formatDui, NOMBRE_MAX, DIRECCION_MAX } from "@/lib/validation";
 import { useSecretariaData } from "../context";
 
 const BLANK_VEH = { plate: "", brand: "", model: "", year: new Date().getFullYear(), color: "", mileage: 0, clientId: 0 };
-const BLANK_CLI = { name: "", phone: "", address: "", dui: "" };
+const BLANK_CLI = { name: "", phone: "", address: "", dui: "", email: "" };
 const TODAY = fromInputDate(new Date().toISOString().slice(0, 10));
 
 function tomorrow() {
@@ -29,6 +30,18 @@ export default function OrdenesView() {
   const [comprobante, setComprobante] = useState<ServiceOrder | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  function updateVeh<K extends keyof typeof veh>(key: K, value: (typeof veh)[K]) {
+    setVeh((v) => ({ ...v, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[`veh.${key}`]; return next; });
+  }
+
+  function updateCli(key: keyof typeof cli, raw: string) {
+    const value = key === "phone" ? formatTelefono(raw) : key === "dui" ? formatDui(raw) : raw;
+    setCli((c) => ({ ...c, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[`cli.${key}`]; return next; });
+  }
 
   const filtered = serviceOrders.filter((o) => {
     const v = vehicles.find((x) => x.id === o.vehicleId);
@@ -56,20 +69,30 @@ export default function OrdenesView() {
     setServices([]);
     setDelivery(tomorrow());
     setError(null);
+    setFieldErrors({});
     setModal(true);
   }
 
   async function handleSave() {
     if (services.length === 0) return;
     setError(null);
+
+    if (newVehicle) {
+      const vehErrors = validarVehiculo(veh);
+      const cliErrors = newClient ? validarCliente(cli) : {};
+      if (newClient ? !cli.name.trim() && Object.keys(cliErrors).length === 0 : false) cliErrors.name = "El nombre es obligatorio.";
+      const prefixed: Record<string, string> = {};
+      for (const [k, v] of Object.entries(vehErrors)) prefixed[`veh.${k}`] = v;
+      for (const [k, v] of Object.entries(cliErrors)) prefixed[`cli.${k}`] = v;
+      if (Object.keys(prefixed).length > 0) { setFieldErrors(prefixed); return; }
+    }
+
     try {
       let finalVehicleId = vehicleId;
 
       if (newVehicle) {
-        if (!veh.plate.trim() || !veh.brand.trim()) return;
         let clientId = veh.clientId;
         if (newClient) {
-          if (!cli.name.trim()) return;
           const createdClient = await addClient(cli);
           clientId = createdClient.id;
         }
@@ -214,27 +237,33 @@ export default function OrdenesView() {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <div>
                         <label style={labelStyle}>Placa *</label>
-                        <input style={inputStyle} placeholder="ABC-1234" value={veh.plate} onChange={(e) => setVeh((v) => ({ ...v, plate: e.target.value.toUpperCase() }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.plate"] ? "#ef4444" : inputStyle.borderColor }} placeholder="P123-456" maxLength={9} value={veh.plate} onChange={(e) => updateVeh("plate", e.target.value.toUpperCase())} />
+                        {fieldErrors["veh.plate"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.plate"]}</p>}
                       </div>
                       <div>
                         <label style={labelStyle}>Marca *</label>
-                        <input style={inputStyle} placeholder="Toyota" value={veh.brand} onChange={(e) => setVeh((v) => ({ ...v, brand: e.target.value }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.brand"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Toyota" maxLength={40} value={veh.brand} onChange={(e) => updateVeh("brand", e.target.value)} />
+                        {fieldErrors["veh.brand"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.brand"]}</p>}
                       </div>
                       <div>
                         <label style={labelStyle}>Modelo</label>
-                        <input style={inputStyle} placeholder="Corolla" value={veh.model} onChange={(e) => setVeh((v) => ({ ...v, model: e.target.value }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.model"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Corolla" maxLength={40} value={veh.model} onChange={(e) => updateVeh("model", e.target.value)} />
+                        {fieldErrors["veh.model"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.model"]}</p>}
                       </div>
                       <div>
                         <label style={labelStyle}>Año</label>
-                        <input style={inputStyle} type="number" placeholder="2020" value={veh.year} onChange={(e) => setVeh((v) => ({ ...v, year: Number(e.target.value) }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.year"] ? "#ef4444" : inputStyle.borderColor }} type="number" placeholder="2020" value={veh.year} onChange={(e) => updateVeh("year", Number(e.target.value))} />
+                        {fieldErrors["veh.year"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.year"]}</p>}
                       </div>
                       <div>
                         <label style={labelStyle}>Color</label>
-                        <input style={inputStyle} placeholder="Blanco" value={veh.color} onChange={(e) => setVeh((v) => ({ ...v, color: e.target.value }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.color"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Blanco" maxLength={30} value={veh.color} onChange={(e) => updateVeh("color", e.target.value)} />
+                        {fieldErrors["veh.color"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.color"]}</p>}
                       </div>
                       <div>
                         <label style={labelStyle}>Kilometraje</label>
-                        <input style={inputStyle} type="number" placeholder="35000" value={veh.mileage || ""} onChange={(e) => setVeh((v) => ({ ...v, mileage: Number(e.target.value) }))} />
+                        <input style={{ ...inputStyle, borderColor: fieldErrors["veh.mileage"] ? "#ef4444" : inputStyle.borderColor }} type="number" placeholder="35000" value={veh.mileage || ""} onChange={(e) => updateVeh("mileage", Number(e.target.value))} />
+                        {fieldErrors["veh.mileage"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.mileage"]}</p>}
                       </div>
                     </div>
 
@@ -257,9 +286,26 @@ export default function OrdenesView() {
                         </div>
                       ) : (
                         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                          <input style={inputStyle} placeholder="Nombre completo *" value={cli.name} onChange={(e) => setCli((c) => ({ ...c, name: e.target.value }))} />
-                          <input style={inputStyle} placeholder="Teléfono" value={cli.phone} onChange={(e) => setCli((c) => ({ ...c, phone: e.target.value }))} />
-                          <input style={inputStyle} placeholder="DUI" value={cli.dui} onChange={(e) => setCli((c) => ({ ...c, dui: e.target.value }))} />
+                          <div>
+                            <input style={{ ...inputStyle, borderColor: fieldErrors["cli.name"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Nombre completo *" maxLength={NOMBRE_MAX} value={cli.name} onChange={(e) => updateCli("name", e.target.value)} />
+                            {fieldErrors["cli.name"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.name"]}</p>}
+                          </div>
+                          <div>
+                            <input style={{ ...inputStyle, borderColor: fieldErrors["cli.phone"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Teléfono (7123-4567)" maxLength={9} value={cli.phone} onChange={(e) => updateCli("phone", e.target.value)} />
+                            {fieldErrors["cli.phone"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.phone"]}</p>}
+                          </div>
+                          <div>
+                            <input style={{ ...inputStyle, borderColor: fieldErrors["cli.dui"] ? "#ef4444" : inputStyle.borderColor }} placeholder="DUI (01234567-8)" maxLength={10} value={cli.dui} onChange={(e) => updateCli("dui", e.target.value)} />
+                            {fieldErrors["cli.dui"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.dui"]}</p>}
+                          </div>
+                          <div>
+                            <input style={{ ...inputStyle, borderColor: fieldErrors["cli.address"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Dirección" maxLength={DIRECCION_MAX} value={cli.address} onChange={(e) => updateCli("address", e.target.value)} />
+                            {fieldErrors["cli.address"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.address"]}</p>}
+                          </div>
+                          <div>
+                            <input style={{ ...inputStyle, borderColor: fieldErrors["cli.email"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Correo (opcional)" maxLength={150} value={cli.email} onChange={(e) => updateCli("email", e.target.value)} />
+                            {fieldErrors["cli.email"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.email"]}</p>}
+                          </div>
                         </div>
                       )}
                     </div>

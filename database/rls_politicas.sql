@@ -318,3 +318,42 @@ RETURNS TABLE(nombre TEXT, usado BIGINT) AS $$
 $$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
 
 GRANT EXECUTE ON FUNCTION fn_repuestos_mas_usados_mes() TO authenticated;
+
+-- =====================================================================
+-- 12. fn_mecanico_nombre_por_orden / fn_repuestos_de_ordenes — el mismo
+--     problema de la política 11, pero en Facturación: Secretario/a no
+--     tiene permiso de leer `empleado` (política 4) ni `repuesto`
+--     (política 8), así que al listar facturas el mecánico salía SIEMPRE
+--     "Sin asignar" (aunque sí tuviera uno asignado) y los repuestos
+--     usados desaparecían de la factura — el subtotal mostrado no
+--     cuadraba con la suma de las líneas visibles, exactamente el bug
+--     reportado. Reproducido en vivo firmando como erodriguez antes de
+--     este arreglo: la orden_servicio.empleado y detalle_repuesto.repuesto
+--     embebidos llegaban en null pese a existir los datos.
+--     Estas dos funciones resuelven ambos cruces por dentro (SECURITY
+--     DEFINER) y solo devuelven el nombre / la línea de repuesto ya
+--     resuelta — nunca la tabla completa de empleado ni de repuesto — así
+--     que el aislamiento entre módulos que pide CLAUDE.md se mantiene.
+-- =====================================================================
+CREATE OR REPLACE FUNCTION fn_mecanico_nombre_por_orden(p_ids INT[])
+RETURNS TABLE(id_orden_servicio INT, mecanico_nombre TEXT) AS $$
+    SELECT os.id_orden_servicio, u.nombre_completo
+    FROM orden_servicio os
+    JOIN empleado e ON e.id_empleado = os.id_empleado
+    JOIN usuario u ON u.id_usuario = e.id_usuario
+    WHERE os.id_orden_servicio = ANY(p_ids)
+      AND fn_rol_actual() IN ('Administrador', 'Supervisora', 'Secretario/a')
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION fn_mecanico_nombre_por_orden(INT[]) TO authenticated;
+
+CREATE OR REPLACE FUNCTION fn_repuestos_de_ordenes(p_ids INT[])
+RETURNS TABLE(id_orden_servicio INT, nombre TEXT, cantidad INT, precio_unitario NUMERIC, subtotal NUMERIC) AS $$
+    SELECT dr.id_orden_servicio, r.nombre, dr.cantidad, dr.precio_unitario_aplicado, dr.subtotal
+    FROM detalle_repuesto dr
+    JOIN repuesto r ON r.id_repuesto = dr.id_repuesto
+    WHERE dr.id_orden_servicio = ANY(p_ids)
+      AND fn_rol_actual() IN ('Administrador', 'Secretario/a')
+$$ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION fn_repuestos_de_ordenes(INT[]) TO authenticated;

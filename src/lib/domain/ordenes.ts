@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { toDMY } from "@/lib/format";
+import { type Result, ok, fail } from "@/lib/result";
 
 export type OrderStatus = "Pendiente" | "En Proceso" | "Finalizado" | "Entregado";
 
@@ -99,14 +100,14 @@ export async function listOrdenesSecretaria(): Promise<ServiceOrder[]> {
   }));
 }
 
-export async function crearOrden(vehicleId: number, serviceNames: string[], estimatedDeliveryISO: string): Promise<ServiceOrder> {
-  if (!vehicleId || serviceNames.length === 0) throw new Error("Selecciona un vehículo y al menos un servicio.");
+export async function crearOrden(vehicleId: number, serviceNames: string[], estimatedDeliveryISO: string): Promise<Result<ServiceOrder>> {
+  if (!vehicleId || serviceNames.length === 0) return fail("Selecciona un vehículo y al menos un servicio.");
   const supabase = await createClient();
 
   const { data: catalogo, error: catError } = await supabase.from("servicio").select("id_servicio, nombre_servicio, precio_base").in("nombre_servicio", serviceNames);
-  if (catError) throw new Error(catError.message);
+  if (catError) return fail(catError.message);
   const catalogoRows = catalogo as { id_servicio: number; nombre_servicio: string; precio_base: number }[];
-  if (catalogoRows.length === 0) throw new Error("Los servicios seleccionados no existen en el catálogo.");
+  if (catalogoRows.length === 0) return fail("Los servicios seleccionados no existen en el catálogo.");
 
   const idPendiente = await estadoOrdenId(supabase, "Pendiente");
 
@@ -115,7 +116,7 @@ export async function crearOrden(vehicleId: number, serviceNames: string[], esti
     .insert({ id_vehiculo: vehicleId, id_estado_orden: idPendiente, fecha_entrega_estimada: estimatedDeliveryISO })
     .select("id_orden_servicio, fecha_ingreso, fecha_entrega_estimada")
     .single();
-  if (ordenError) throw new Error(ordenError.message);
+  if (ordenError) return fail(ordenError.message);
   const ordenRow = orden as { id_orden_servicio: number; fecha_ingreso: string; fecha_entrega_estimada: string };
 
   const detalles = catalogoRows.map((s) => ({
@@ -124,15 +125,15 @@ export async function crearOrden(vehicleId: number, serviceNames: string[], esti
     precio_aplicado: s.precio_base,
   }));
   const { error: detError } = await supabase.from("detalle_servicio").insert(detalles);
-  if (detError) throw new Error(detError.message);
+  if (detError) return fail(detError.message);
 
-  return {
+  return ok({
     id: ordenRow.id_orden_servicio,
     vehicleId,
     services: catalogoRows.map((s) => s.nombre_servicio),
     receivedDate: toDMY(ordenRow.fecha_ingreso),
     estimatedDelivery: toDMY(ordenRow.fecha_entrega_estimada),
-  };
+  });
 }
 
 interface OrdenSupervisoraRow {
@@ -258,18 +259,18 @@ export async function marcarServicioCompletado(idDetalleServicio: number, comple
   if (error) throw new Error(error.message);
 }
 
-export async function agregarRepuestoAOrden(ordenId: number, repuestoId: number, cantidad: number): Promise<void> {
-  if (cantidad < 1) throw new Error("La cantidad debe ser al menos 1.");
+export async function agregarRepuestoAOrden(ordenId: number, repuestoId: number, cantidad: number): Promise<Result<void>> {
+  if (cantidad < 1) return fail("La cantidad debe ser al menos 1.");
   const supabase = await createClient();
   const { data: repuesto, error: repError } = await supabase
     .from("repuesto")
     .select("precio_unitario, stock_actual, nombre")
     .eq("id_repuesto", repuestoId)
     .single();
-  if (repError || !repuesto) throw new Error("El repuesto seleccionado no existe.");
+  if (repError || !repuesto) return fail("El repuesto seleccionado no existe.");
   const r = repuesto as { precio_unitario: number; stock_actual: number; nombre: string };
   if (r.stock_actual < cantidad) {
-    throw new Error(`No hay suficiente stock de "${r.nombre}" (quedan ${r.stock_actual}).`);
+    return fail(`No hay suficiente stock de "${r.nombre}" (quedan ${r.stock_actual}).`);
   }
 
   const { error } = await supabase.from("detalle_repuesto").insert({
@@ -278,5 +279,6 @@ export async function agregarRepuestoAOrden(ordenId: number, repuestoId: number,
     cantidad,
     precio_unitario_aplicado: r.precio_unitario,
   });
-  if (error) throw new Error(error.message);
+  if (error) return fail(error.message);
+  return ok(undefined);
 }

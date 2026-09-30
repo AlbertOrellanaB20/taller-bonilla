@@ -7,6 +7,7 @@ import {
   generarFactura,
   marcarFacturaPagada,
   anularFactura,
+  enviarFacturaPorCorreo,
   listOrdenesListasParaFacturar,
   listFacturas,
   type ReadyOrder,
@@ -14,8 +15,10 @@ import {
   type PayMethod,
 } from "@/lib/domain/facturacion";
 import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
+import { unwrap } from "@/lib/result";
 import { calcIva, calcTotal, fmtUSD } from "@/lib/format";
 import { montoEnLetras } from "@/lib/numero-a-letras";
+import { exportFacturaPdf } from "@/lib/reports/factura-pdf";
 
 interface SecretariaDataValue {
   clients: Client[];
@@ -78,19 +81,19 @@ export function SecretariaDataProvider({
   useRealtimeTable(["orden_servicio", "detalle_servicio", "factura"], refetch);
 
   async function addClient(input: Omit<Client, "id">): Promise<Client> {
-    const created = await crearCliente(input);
+    const created = unwrap(await crearCliente(input));
     setClients((prev) => [...prev, created]);
     return created;
   }
 
   async function addVehicle(input: Omit<Vehicle, "id">): Promise<Vehicle> {
-    const created = await crearVehiculo(input);
+    const created = unwrap(await crearVehiculo(input));
     setVehicles((prev) => [...prev, created]);
     return created;
   }
 
   async function addServiceOrder(vehicleId: number, services: string[], deliveryInputDate: string): Promise<ServiceOrder> {
-    const created = await crearOrden(vehicleId, services, deliveryInputDate);
+    const created = unwrap(await crearOrden(vehicleId, services, deliveryInputDate));
     setServiceOrders((prev) => [created, ...prev]);
     return created;
   }
@@ -106,7 +109,7 @@ export function SecretariaDataProvider({
   }
 
   async function handleConfirm(orderId: number, method: PayMethod): Promise<string> {
-    const { number } = await generarFactura(orderId, method);
+    const { number } = unwrap(await generarFactura(orderId, method));
     await refetch();
     return number;
   }
@@ -314,6 +317,21 @@ function CarWatermark() {
 function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => void }) {
   const statusColor: Record<string, string> = { Pagada: "#4ade80", Pendiente: "#facc15", Anulada: "#94a3b8" };
   const methodColor: Record<string, string> = { Efectivo: "#4ade80", Tarjeta: "#60a5fa", Transferencia: "#a78bfa" };
+  const [emailState, setEmailState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [emailError, setEmailError] = useState<string | null>(null);
+
+  async function handleSendEmail() {
+    setEmailState("sending");
+    setEmailError(null);
+    try {
+      unwrap(await enviarFacturaPorCorreo(invoice.id));
+      setEmailState("sent");
+      setTimeout(() => setEmailState("idle"), 3000);
+    } catch (e) {
+      setEmailState("error");
+      setEmailError(e instanceof Error ? e.message : "No se pudo enviar el correo.");
+    }
+  }
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)", padding: 16 }} onClick={onClose}>
@@ -393,10 +411,20 @@ function DetailModal({ invoice, onClose }: { invoice: Invoice; onClose: () => vo
             <span>Mecánico: <strong style={{ color: "#333" }}>{invoice.mechanic}</strong></span>
             <span style={{ color: "#bbb", fontSize: 10 }}>Sistema Taller Bonilla</span>
           </div>
+          {emailError && (
+            <div style={{ marginTop: 10, background: "rgba(220,38,38,0.08)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 8, padding: "8px 12px", color: "#b91c1c", fontSize: 12 }}>
+              {emailError}
+            </div>
+          )}
         </div>
         <div style={{ padding: "12px 24px 20px", display: "flex", gap: 10, justifyContent: "flex-end", position: "relative", zIndex: 1 }}>
           <button onClick={onClose} style={{ background: "#f0f0f0", border: "none", borderRadius: 8, padding: "9px 20px", color: "#555", fontSize: 13, fontWeight: 500, cursor: "pointer" }}>Cerrar</button>
-          <button onClick={() => window.print()} style={{ background: "#0D0D0F", border: "none", borderRadius: 8, padding: "9px 20px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
+          <button onClick={handleSendEmail} disabled={emailState === "sending"}
+            style={{ background: emailState === "sent" ? "#16a34a" : "#fff", border: "1px solid #d0d0d0", borderRadius: 8, padding: "9px 16px", color: emailState === "sent" ? "#fff" : "#333", fontSize: 13, fontWeight: 600, cursor: emailState === "sending" ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 6, transition: "all .2s" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16v16H4z" opacity="0" /><path d="M22 6c0-1.1-.9-2-2-2H4a2 2 0 0 0-2 2v12c0 1.1.9 2 2 2h16a2 2 0 0 0 2-2V6z" /><path d="m22 6-10 7L2 6" /></svg>
+            {emailState === "sending" ? "Enviando..." : emailState === "sent" ? "¡Enviado!" : "Enviar por correo"}
+          </button>
+          <button onClick={() => exportFacturaPdf(invoice)} style={{ background: "#0D0D0F", border: "none", borderRadius: 8, padding: "9px 20px", color: "#fff", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>
             Imprimir
           </button>

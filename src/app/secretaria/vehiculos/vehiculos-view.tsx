@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useSecretariaData } from "../context";
+import { validarVehiculo, validarCliente, formatTelefono, formatDui, NOMBRE_MAX } from "@/lib/validation";
 
 const BLANK_VEH = { plate: "", brand: "", model: "", year: new Date().getFullYear(), color: "", mileage: 0, clientId: 0 };
-const BLANK_CLI = { name: "", phone: "", address: "", dui: "" };
+const BLANK_CLI = { name: "", phone: "", address: "", dui: "", email: "" };
 
 function colorHex(color: string): string {
   const map: Record<string, string> = { Blanco: "#f5f5f5", Negro: "#1a1a1a", Gris: "#888", Rojo: "#dc2626", Azul: "#2563eb", Verde: "#16a34a", Plata: "#cbd5e1", Amarillo: "#eab308", Naranja: "#ea580c", Morado: "#9333ea" };
@@ -20,6 +21,18 @@ export default function VehiculosView() {
   const [search, setSearch] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  function updateVeh<K extends keyof typeof veh>(key: K, value: (typeof veh)[K]) {
+    setVeh((v) => ({ ...v, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[`veh.${key}`]; return next; });
+  }
+
+  function updateCli(key: keyof typeof cli, raw: string) {
+    const value = key === "phone" ? formatTelefono(raw) : key === "dui" ? formatDui(raw) : raw;
+    setCli((c) => ({ ...c, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[`cli.${key}`]; return next; });
+  }
 
   const filtered = vehicles.filter((v) => {
     const owner = clients.find((c) => c.id === v.clientId);
@@ -30,15 +43,20 @@ export default function VehiculosView() {
     return clients.find((c) => c.id === clientId)?.name ?? "—";
   }
 
-  function openModal() { setVeh({ ...BLANK_VEH, clientId: clients[0]?.id ?? 0 }); setCli(BLANK_CLI); setNewClient(false); setSaved(false); setError(null); setModal(true); }
+  function openModal() { setVeh({ ...BLANK_VEH, clientId: clients[0]?.id ?? 0 }); setCli(BLANK_CLI); setNewClient(false); setSaved(false); setError(null); setFieldErrors({}); setModal(true); }
 
   async function handleSave() {
-    if (!veh.plate.trim() || !veh.brand.trim()) return;
     setError(null);
+    const vehErrors = validarVehiculo(veh);
+    const cliErrors = newClient ? validarCliente(cli) : {};
+    const prefixed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(vehErrors)) prefixed[`veh.${k}`] = v;
+    for (const [k, v] of Object.entries(cliErrors)) prefixed[`cli.${k}`] = v;
+    if (Object.keys(prefixed).length > 0) { setFieldErrors(prefixed); return; }
+
     try {
       let clientId = veh.clientId;
       if (newClient) {
-        if (!cli.name.trim()) return;
         const created = await addClient(cli);
         clientId = created.id;
       }
@@ -148,27 +166,33 @@ export default function VehiculosView() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
                   {label("Placa")}
-                  <input style={inputStyle} placeholder="Ej: ABC-1234" value={veh.plate} onChange={(e) => setVeh((v) => ({ ...v, plate: e.target.value.toUpperCase() }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.plate"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Ej: P123-456" maxLength={9} value={veh.plate} onChange={(e) => updateVeh("plate", e.target.value.toUpperCase())} />
+                  {fieldErrors["veh.plate"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.plate"]}</p>}
                 </div>
                 <div>
                   {label("Marca")}
-                  <input style={inputStyle} placeholder="Ej: Toyota" value={veh.brand} onChange={(e) => setVeh((v) => ({ ...v, brand: e.target.value }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.brand"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Ej: Toyota" maxLength={40} value={veh.brand} onChange={(e) => updateVeh("brand", e.target.value)} />
+                  {fieldErrors["veh.brand"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.brand"]}</p>}
                 </div>
                 <div>
                   {label("Modelo")}
-                  <input style={inputStyle} placeholder="Ej: Corolla" value={veh.model} onChange={(e) => setVeh((v) => ({ ...v, model: e.target.value }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.model"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Ej: Corolla" maxLength={40} value={veh.model} onChange={(e) => updateVeh("model", e.target.value)} />
+                  {fieldErrors["veh.model"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.model"]}</p>}
                 </div>
                 <div>
                   {label("Año")}
-                  <input style={inputStyle} type="number" placeholder="Ej: 2020" value={veh.year} onChange={(e) => setVeh((v) => ({ ...v, year: Number(e.target.value) }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.year"] ? "#ef4444" : inputStyle.borderColor }} type="number" placeholder="Ej: 2020" value={veh.year} onChange={(e) => updateVeh("year", Number(e.target.value))} />
+                  {fieldErrors["veh.year"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.year"]}</p>}
                 </div>
                 <div>
                   {label("Color")}
-                  <input style={inputStyle} placeholder="Ej: Blanco" value={veh.color} onChange={(e) => setVeh((v) => ({ ...v, color: e.target.value }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.color"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Ej: Blanco" maxLength={30} value={veh.color} onChange={(e) => updateVeh("color", e.target.value)} />
+                  {fieldErrors["veh.color"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.color"]}</p>}
                 </div>
                 <div>
                   {label("Kilometraje")}
-                  <input style={inputStyle} type="number" placeholder="Ej: 35000" value={veh.mileage || ""} onChange={(e) => setVeh((v) => ({ ...v, mileage: Number(e.target.value) }))} />
+                  <input style={{ ...inputStyle, borderColor: fieldErrors["veh.mileage"] ? "#ef4444" : inputStyle.borderColor }} type="number" placeholder="Ej: 35000" value={veh.mileage || ""} onChange={(e) => updateVeh("mileage", Number(e.target.value))} />
+                  {fieldErrors["veh.mileage"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["veh.mileage"]}</p>}
                 </div>
               </div>
 
@@ -192,10 +216,26 @@ export default function VehiculosView() {
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <input style={inputStyle} placeholder="Nombre completo *" value={cli.name} onChange={(e) => setCli((c) => ({ ...c, name: e.target.value }))} />
-                    <input style={inputStyle} placeholder="Teléfono" value={cli.phone} onChange={(e) => setCli((c) => ({ ...c, phone: e.target.value }))} />
-                    <input style={inputStyle} placeholder="Dirección" value={cli.address} onChange={(e) => setCli((c) => ({ ...c, address: e.target.value }))} />
-                    <input style={inputStyle} placeholder="DUI (Ej: 01234567-8)" value={cli.dui} onChange={(e) => setCli((c) => ({ ...c, dui: e.target.value }))} />
+                    <div>
+                      <input style={{ ...inputStyle, borderColor: fieldErrors["cli.name"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Nombre completo *" maxLength={NOMBRE_MAX} value={cli.name} onChange={(e) => updateCli("name", e.target.value)} />
+                      {fieldErrors["cli.name"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.name"]}</p>}
+                    </div>
+                    <div>
+                      <input style={{ ...inputStyle, borderColor: fieldErrors["cli.phone"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Teléfono (7123-4567)" maxLength={9} value={cli.phone} onChange={(e) => updateCli("phone", e.target.value)} />
+                      {fieldErrors["cli.phone"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.phone"]}</p>}
+                    </div>
+                    <div>
+                      <input style={{ ...inputStyle, borderColor: fieldErrors["cli.address"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Dirección" value={cli.address} onChange={(e) => updateCli("address", e.target.value)} />
+                      {fieldErrors["cli.address"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.address"]}</p>}
+                    </div>
+                    <div>
+                      <input style={{ ...inputStyle, borderColor: fieldErrors["cli.dui"] ? "#ef4444" : inputStyle.borderColor }} placeholder="DUI (Ej: 01234567-8)" maxLength={10} value={cli.dui} onChange={(e) => updateCli("dui", e.target.value)} />
+                      {fieldErrors["cli.dui"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.dui"]}</p>}
+                    </div>
+                    <div>
+                      <input style={{ ...inputStyle, borderColor: fieldErrors["cli.email"] ? "#ef4444" : inputStyle.borderColor }} placeholder="Correo (opcional)" maxLength={150} value={cli.email} onChange={(e) => updateCli("email", e.target.value)} />
+                      {fieldErrors["cli.email"] && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors["cli.email"]}</p>}
+                    </div>
                   </div>
                 )}
               </div>

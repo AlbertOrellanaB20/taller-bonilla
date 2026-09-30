@@ -1,6 +1,8 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
+import { validarProveedor, validarRepuesto } from "@/lib/validation";
+import { type Result, ok, fail } from "@/lib/result";
 
 export interface Supplier {
   id: number;
@@ -69,16 +71,18 @@ export async function listRepuestos(): Promise<Part[]> {
   return (data as RepuestoRow[]).map(mapRepuesto);
 }
 
-export async function crearProveedor(name: string, phone: string): Promise<Supplier> {
-  if (!name.trim()) throw new Error("El nombre del proveedor es obligatorio.");
+export async function crearProveedor(name: string, phone: string): Promise<Result<Supplier>> {
+  const errors = validarProveedor({ name, phone });
+  const firstError = Object.values(errors)[0];
+  if (firstError) return fail(firstError);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("proveedor")
     .insert({ nombre: name.trim(), telefono: phone.trim() || null })
     .select("id_proveedor, nombre, telefono, activo")
     .single();
-  if (error) throw new Error(error.message);
-  return mapProveedor(data as ProveedorRow);
+  if (error) return fail(error.message);
+  return ok(mapProveedor(data as ProveedorRow));
 }
 
 export async function toggleActivoProveedor(id: number, active: boolean): Promise<void> {
@@ -87,8 +91,10 @@ export async function toggleActivoProveedor(id: number, active: boolean): Promis
   if (error) throw new Error(error.message);
 }
 
-export async function crearRepuesto(input: Omit<Part, "id">): Promise<Part> {
-  if (!input.code.trim() || !input.name.trim()) throw new Error("Código y nombre son obligatorios.");
+export async function crearRepuesto(input: Omit<Part, "id">): Promise<Result<Part>> {
+  const errors = validarRepuesto(input);
+  const firstError = Object.values(errors)[0];
+  if (firstError) return fail(firstError);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("repuesto")
@@ -102,8 +108,8 @@ export async function crearRepuesto(input: Omit<Part, "id">): Promise<Part> {
     })
     .select("id_repuesto, codigo, nombre, id_proveedor, stock_actual, stock_minimo, precio_unitario")
     .single();
-  if (error) throw new Error(error.message);
-  return mapRepuesto(data as RepuestoRow);
+  if (error) return fail(error.code === "23505" ? `Ya existe un repuesto con el código "${input.code.trim().toUpperCase()}".` : error.message);
+  return ok(mapRepuesto(data as RepuestoRow));
 }
 
 export interface UsoRepuesto {
@@ -128,15 +134,15 @@ export async function listRepuestosMasUsadosMes(): Promise<UsoRepuesto[]> {
   return (data as { nombre: string; usado: number }[]).map((d) => ({ name: d.nombre, used: Number(d.usado) }));
 }
 
-export async function ajustarStock(partId: number, type: "entrada" | "salida", qty: number, reason: string): Promise<Part> {
-  if (qty < 1 || !reason.trim()) throw new Error("Cantidad y motivo son obligatorios.");
+export async function ajustarStock(partId: number, type: "entrada" | "salida", qty: number, reason: string): Promise<Result<Part>> {
+  if (qty < 1 || !reason.trim()) return fail("Cantidad y motivo son obligatorios.");
   const supabase = await createClient();
   const { data: current, error: readError } = await supabase
     .from("repuesto")
     .select("stock_actual")
     .eq("id_repuesto", partId)
     .single();
-  if (readError) throw new Error(readError.message);
+  if (readError) return fail(readError.message);
 
   const delta = type === "entrada" ? qty : -qty;
   const nuevoStock = Math.max(0, (current as { stock_actual: number }).stock_actual + delta);
@@ -147,6 +153,6 @@ export async function ajustarStock(partId: number, type: "entrada" | "salida", q
     .eq("id_repuesto", partId)
     .select("id_repuesto, codigo, nombre, id_proveedor, stock_actual, stock_minimo, precio_unitario")
     .single();
-  if (error) throw new Error(error.message);
-  return mapRepuesto(data as RepuestoRow);
+  if (error) return fail(error.message);
+  return ok(mapRepuesto(data as RepuestoRow));
 }

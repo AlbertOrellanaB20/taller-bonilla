@@ -11,11 +11,14 @@ import {
   toggleActivoProveedor,
 } from "@/lib/domain/inventario";
 import { useRealtimeTable } from "@/lib/supabase/use-realtime-table";
+import { unwrap } from "@/lib/result";
+import { validarRepuesto, validarProveedor, formatTelefono } from "@/lib/validation";
 
 interface InventarioDataValue {
   parts: Part[];
   suppliers: Supplier[];
   criticalCount: number;
+  criticalParts: Part[];
   openAdjust: (partId: number) => void;
   openNewPart: () => void;
   openNewSupplier: () => void;
@@ -51,6 +54,7 @@ export function InventarioDataProvider({
   const [showNewPart, setShowNewPart] = useState(false);
   const [showNewSup, setShowNewSup] = useState(false);
 
+  const criticalParts = parts.filter((p) => stockStatusLocal(p) !== "ok");
   const criticalCount = parts.filter((p) => stockStatusLocal(p) === "critical").length;
 
   const refetchParts = useCallback(async () => {
@@ -60,17 +64,17 @@ export function InventarioDataProvider({
   useRealtimeTable(["repuesto"], refetchParts);
 
   async function handleAdjust(partId: number, type: "entrada" | "salida", qty: number, reason: string) {
-    const updated = await ajustarStock(partId, type, qty, reason);
+    const updated = unwrap(await ajustarStock(partId, type, qty, reason));
     setParts((prev) => prev.map((p) => (p.id === partId ? updated : p)));
   }
 
   async function handleAddPart(data: Omit<Part, "id">) {
-    const created = await crearRepuesto(data);
+    const created = unwrap(await crearRepuesto(data));
     setParts((prev) => [...prev, created]);
   }
 
   async function handleAddSupplier(name: string, phone: string) {
-    const created = await crearProveedor(name, phone);
+    const created = unwrap(await crearProveedor(name, phone));
     setSuppliers((prev) => [...prev, created]);
   }
 
@@ -91,6 +95,7 @@ export function InventarioDataProvider({
         parts,
         suppliers,
         criticalCount,
+        criticalParts,
         openAdjust: setAdjustId,
         openNewPart: () => setShowNewPart(true),
         openNewSupplier: () => setShowNewSup(true),
@@ -242,11 +247,19 @@ function NewPartModal({ suppliers, onClose, onSave }: {
   const [form, setForm] = useState({ ...BLANK_PART, supplierId: activeSuppliers[0]?.id ?? 0 });
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const valid = form.code.trim() && form.name.trim() && form.supplierId > 0;
 
+  function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next[key]; return next; });
+  }
+
   async function handleSave() {
     if (!valid) return;
+    const errors = validarRepuesto(form);
+    if (Object.keys(errors).length > 0) { setFieldErrors(errors); return; }
     setError(null);
     setSaving(true);
     try {
@@ -290,11 +303,13 @@ function NewPartModal({ suppliers, onClose, onSave }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 12 }}>
             <div>
               {label("Código")}
-              <input className="db-input" placeholder="FIL-021" value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))} />
+              <input className="db-input" placeholder="FIL-021" maxLength={9} value={form.code} onChange={(e) => update("code", e.target.value.toUpperCase())} style={fieldErrors.code ? { borderColor: "#ef4444" } : undefined} />
+              {fieldErrors.code && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.code}</p>}
             </div>
             <div>
               {label("Nombre del repuesto")}
-              <input className="db-input" placeholder="Ej: Filtro de aceite premium" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
+              <input className="db-input" placeholder="Ej: Filtro de aceite premium" maxLength={80} value={form.name} onChange={(e) => update("name", e.target.value)} style={fieldErrors.name ? { borderColor: "#ef4444" } : undefined} />
+              {fieldErrors.name && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.name}</p>}
             </div>
           </div>
 
@@ -312,15 +327,18 @@ function NewPartModal({ suppliers, onClose, onSave }: {
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
             <div>
               {label("Stock inicial")}
-              <input type="number" min={0} className="db-input" placeholder="0" value={form.stock || ""} onChange={(e) => setForm((f) => ({ ...f, stock: Number(e.target.value) }))} />
+              <input type="number" min={0} className="db-input" placeholder="0" value={form.stock || ""} onChange={(e) => update("stock", Number(e.target.value))} style={fieldErrors.stock ? { borderColor: "#ef4444" } : undefined} />
+              {fieldErrors.stock && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.stock}</p>}
             </div>
             <div>
               {label("Stock mínimo")}
-              <input type="number" min={1} className="db-input" placeholder="5" value={form.minStock || ""} onChange={(e) => setForm((f) => ({ ...f, minStock: Number(e.target.value) }))} />
+              <input type="number" min={1} className="db-input" placeholder="5" value={form.minStock || ""} onChange={(e) => update("minStock", Number(e.target.value))} style={fieldErrors.minStock ? { borderColor: "#ef4444" } : undefined} />
+              {fieldErrors.minStock && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.minStock}</p>}
             </div>
             <div>
               {label("Precio unit. ($)")}
-              <input type="number" min={0} step="0.01" className="db-input" placeholder="0.00" value={form.price || ""} onChange={(e) => setForm((f) => ({ ...f, price: Number(e.target.value) }))} />
+              <input type="number" min={0} step="0.01" className="db-input" placeholder="0.00" value={form.price || ""} onChange={(e) => update("price", Number(e.target.value))} style={fieldErrors.price ? { borderColor: "#ef4444" } : undefined} />
+              {fieldErrors.price && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.price}</p>}
             </div>
           </div>
 
@@ -352,11 +370,19 @@ function NewSupplierModal({ onClose, onSave }: { onClose: () => void; onSave: (n
   const [phone, setPhone] = useState("");
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const valid = name.trim();
 
+  function updatePhone(raw: string) {
+    setPhone(formatTelefono(raw));
+    setFieldErrors((prev) => { const next = { ...prev }; delete next.phone; return next; });
+  }
+
   async function handleSave() {
     if (!valid) return;
+    const errors = validarProveedor({ name, phone });
+    if (Object.keys(errors).length > 0) { setFieldErrors(errors); return; }
     setError(null);
     setSaving(true);
     try {
@@ -397,11 +423,13 @@ function NewSupplierModal({ onClose, onSave }: { onClose: () => void; onSave: (n
         <div style={{ padding: 22, display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
             <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Nombre del proveedor *</label>
-            <input className="db-input" placeholder="Ej: Repuestos El Centro S.A." value={name} onChange={(e) => setName(e.target.value)} />
+            <input className="db-input" placeholder="Ej: Repuestos El Centro S.A." maxLength={100} value={name} onChange={(e) => { setName(e.target.value); setFieldErrors((p) => { const n = { ...p }; delete n.name; return n; }); }} style={fieldErrors.name ? { borderColor: "#ef4444" } : undefined} />
+            {fieldErrors.name && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.name}</p>}
           </div>
           <div>
             <label style={{ display: "block", color: "#8a8a96", fontSize: 11, fontWeight: 500, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.06em" }}>Teléfono</label>
-            <input className="db-input" placeholder="Ej: 2234-5678" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input className="db-input" placeholder="Ej: 2234-5678" maxLength={9} value={phone} onChange={(e) => updatePhone(e.target.value)} style={fieldErrors.phone ? { borderColor: "#ef4444" } : undefined} />
+            {fieldErrors.phone && <p style={{ color: "#ef4444", fontSize: 11, marginTop: 4 }}>{fieldErrors.phone}</p>}
           </div>
 
           {error && (

@@ -2,6 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validarUsuarioBasico } from "@/lib/validation";
+import { type Result, ok, fail } from "@/lib/result";
 
 export type Role = "Administrador" | "Supervisora" | "Secretario/a" | "Mecánico" | "Inventario";
 
@@ -55,9 +57,9 @@ function mapUsuario(r: UsuarioRow): User {
   };
 }
 
-function validarPassword(password: string) {
-  const ok = password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
-  if (!ok) throw new Error("La contraseña debe tener mínimo 8 caracteres, una mayúscula, un número y un carácter especial.");
+function passwordError(password: string): string | null {
+  const valida = password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password);
+  return valida ? null : "La contraseña debe tener mínimo 8 caracteres, una mayúscula, un número y un carácter especial.";
 }
 
 export async function listUsuarios(): Promise<User[]> {
@@ -70,74 +72,80 @@ export async function listUsuarios(): Promise<User[]> {
   return (data as unknown as UsuarioRow[]).map(mapUsuario);
 }
 
-export async function crearUsuario(input: UserFormInput): Promise<User> {
-  if (!input.name.trim() || !input.email.includes("@") || !input.username.trim()) {
-    throw new Error("Nombre, correo y usuario son obligatorios.");
-  }
-  validarPassword(input.password);
+export async function crearUsuario(input: UserFormInput): Promise<Result<User>> {
+  const errors = validarUsuarioBasico(input);
+  const firstError = Object.values(errors)[0];
+  if (firstError) return fail(firstError);
+  const pwError = passwordError(input.password);
+  if (pwError) return fail(pwError);
 
   const admin = createAdminClient();
 
   const { data: rol, error: rolError } = await admin.from("rol").select("id_rol").eq("nombre_rol", input.role).single();
-  if (rolError || !rol) throw new Error("Rol inválido.");
+  if (rolError || !rol) return fail("Rol inválido.");
 
   const { data: authUser, error: authError } = await admin.auth.admin.createUser({
     email: input.email.trim(),
     password: input.password,
     email_confirm: true,
   });
-  if (authError || !authUser.user) throw new Error(authError?.message ?? "No se pudo crear la cuenta de autenticación.");
+  if (authError || !authUser.user) return fail(authError?.message ?? "No se pudo crear la cuenta de autenticación.");
 
-  try {
-    const { data: usuario, error: usuarioError } = await admin
-      .from("usuario")
-      .insert({
-        id_rol: (rol as { id_rol: number }).id_rol,
-        auth_user_id: authUser.user.id,
-        nombre_completo: input.name.trim(),
-        correo: input.email.trim(),
-        nombre_usuario: input.username.trim().toLowerCase(),
-        activo: input.active,
-      })
-      .select("id_usuario, auth_user_id, nombre_completo, correo, nombre_usuario, activo, rol:id_rol(nombre_rol)")
-      .single();
-    if (usuarioError || !usuario) throw new Error(usuarioError?.message ?? "No se pudo crear el usuario.");
-
-    let specialty: string | undefined;
-    if (input.role === "Mecánico") {
-      const codigo = input.username.trim().toUpperCase();
-      const { error: empError } = await admin.from("empleado").insert({
-        id_usuario: (usuario as unknown as { id_usuario: number }).id_usuario,
-        codigo_empleado: codigo,
-        especialidad: input.specialty.trim() || null,
-      });
-      if (empError) throw new Error(empError.message);
-      specialty = input.specialty.trim() || undefined;
-    }
-
-    return { ...mapUsuario(usuario as unknown as UsuarioRow), specialty };
-  } catch (err) {
+  const { data: usuario, error: usuarioError } = await admin
+    .from("usuario")
+    .insert({
+      id_rol: (rol as { id_rol: number }).id_rol,
+      auth_user_id: authUser.user.id,
+      nombre_completo: input.name.trim(),
+      correo: input.email.trim(),
+      nombre_usuario: input.username.trim().toLowerCase(),
+      activo: input.active,
+    })
+    .select("id_usuario, auth_user_id, nombre_completo, correo, nombre_usuario, activo, rol:id_rol(nombre_rol)")
+    .single();
+  if (usuarioError || !usuario) {
     await admin.auth.admin.deleteUser(authUser.user.id);
-    throw err instanceof Error ? err : new Error("No se pudo crear el usuario.");
+    return fail(usuarioError?.code === "23505" ? "Ese nombre de usuario o correo ya existe." : usuarioError?.message ?? "No se pudo crear el usuario.");
   }
+
+  let specialty: string | undefined;
+  if (input.role === "Mecánico") {
+    const codigo = input.username.trim().toUpperCase();
+    const { error: empError } = await admin.from("empleado").insert({
+      id_usuario: (usuario as unknown as { id_usuario: number }).id_usuario,
+      codigo_empleado: codigo,
+      especialidad: input.specialty.trim() || null,
+    });
+    if (empError) {
+      await admin.from("usuario").delete().eq("id_usuario", (usuario as unknown as { id_usuario: number }).id_usuario);
+      await admin.auth.admin.deleteUser(authUser.user.id);
+      return fail(empError.message);
+    }
+    specialty = input.specialty.trim() || undefined;
+  }
+
+  return ok({ ...mapUsuario(usuario as unknown as UsuarioRow), specialty });
 }
 
-export async function actualizarUsuario(id: number, authUserId: string, input: UserFormInput): Promise<User> {
-  if (!input.name.trim() || !input.email.includes("@") || !input.username.trim()) {
-    throw new Error("Nombre, correo y usuario son obligatorios.");
+export async function actualizarUsuario(id: number, authUserId: string, input: UserFormInput): Promise<Result<User>> {
+  const errors = validarUsuarioBasico(input);
+  const firstError = Object.values(errors)[0];
+  if (firstError) return fail(firstError);
+  if (input.password) {
+    const pwError = passwordError(input.password);
+    if (pwError) return fail(pwError);
   }
-  if (input.password) validarPassword(input.password);
 
   const admin = createAdminClient();
 
   const { data: rol, error: rolError } = await admin.from("rol").select("id_rol").eq("nombre_rol", input.role).single();
-  if (rolError || !rol) throw new Error("Rol inválido.");
+  if (rolError || !rol) return fail("Rol inválido.");
 
   const { error: authError } = await admin.auth.admin.updateUserById(authUserId, {
     email: input.email.trim(),
     ...(input.password ? { password: input.password } : {}),
   });
-  if (authError) throw new Error(authError.message);
+  if (authError) return fail(authError.message);
 
   const { data: usuario, error: usuarioError } = await admin
     .from("usuario")
@@ -151,7 +159,7 @@ export async function actualizarUsuario(id: number, authUserId: string, input: U
     .eq("id_usuario", id)
     .select("id_usuario, auth_user_id, nombre_completo, correo, nombre_usuario, activo, rol:id_rol(nombre_rol)")
     .single();
-  if (usuarioError || !usuario) throw new Error(usuarioError?.message ?? "No se pudo actualizar el usuario.");
+  if (usuarioError || !usuario) return fail(usuarioError?.code === "23505" ? "Ese nombre de usuario o correo ya existe." : usuarioError?.message ?? "No se pudo actualizar el usuario.");
 
   let specialty: string | undefined;
   if (input.role === "Mecánico") {
@@ -164,13 +172,23 @@ export async function actualizarUsuario(id: number, authUserId: string, input: U
     specialty = input.specialty.trim() || undefined;
   }
 
-  return { ...mapUsuario(usuario as unknown as UsuarioRow), specialty };
+  return ok({ ...mapUsuario(usuario as unknown as UsuarioRow), specialty });
 }
 
 export async function toggleActivoUsuario(id: number, active: boolean): Promise<void> {
   const supabase = await createClient();
   const { error } = await supabase.from("usuario").update({ activo: active }).eq("id_usuario", id);
   if (error) throw new Error(error.message);
+}
+
+/** Autoservicio: la persona ya autenticada cambia su propia contraseña (no requiere el cliente admin). */
+export async function cambiarMiPassword(newPassword: string): Promise<Result<void>> {
+  const pwError = passwordError(newPassword);
+  if (pwError) return fail(pwError);
+  const supabase = await createClient();
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) return fail(error.message);
+  return ok(undefined);
 }
 
 /** Genera una contraseña temporal segura y se la asigna a la cuenta (no hay envío de correo configurado). */
