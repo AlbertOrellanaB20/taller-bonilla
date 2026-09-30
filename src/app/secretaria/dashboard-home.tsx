@@ -175,7 +175,7 @@ export default function DashboardHome() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
             <h2 style={{ color: "#f0f0f2", fontSize: 15, fontWeight: 600, margin: 0 }}>Órdenes listas para facturar</h2>
             <span style={{ background: readyOrders.length > 0 ? "rgba(163,18,18,0.15)" : "rgba(34,197,94,0.1)", color: readyOrders.length > 0 ? "#f87171" : "#4ade80", fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4 }}>
-              {readyOrders.length} pendientes
+              {readyOrders.length} por facturar
             </span>
           </div>
           {readyOrders.length === 0 ? (

@@ -308,6 +308,11 @@ ALTER TABLE detalle_servicio ADD COLUMN IF NOT EXISTS completado BOOLEAN NOT NUL
 -- un repuesto nuevo — eso lo filtra la app, no la base de datos.
 ALTER TABLE proveedor ADD COLUMN IF NOT EXISTS activo BOOLEAN NOT NULL DEFAULT TRUE;
 
+-- 10.1.2 Columna nueva: correo del cliente, necesaria para poder enviarle la
+-- factura por correo (botón "Enviar por correo" en Facturación). Es opcional
+-- porque muchos clientes ya registrados en papel no tenían correo.
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS correo VARCHAR(150);
+
 -- 10.2 Numeración automática de facturas (FAC-0001, FAC-0002, ...). Con esto
 -- el número de factura ya no se calcula en el frontend: Postgres lo asigna
 -- solo, de forma segura aunque dos personas facturen al mismo tiempo.

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSecretariaData } from "../context";
 import { validarCliente, formatTelefono, formatDui, NOMBRE_MAX, DIRECCION_MAX } from "@/lib/validation";
 
-const BLANK = { name: "", phone: "", address: "", dui: "" };
+const BLANK = { name: "", phone: "", address: "", dui: "", email: "" };
 
 export default function ClientesView() {
   const { clients, vehicles, addClient } = useSecretariaData();
@@ -154,6 +154,7 @@ export default function ClientesView() {
               {field("Teléfono", "phone", "Ej: 7123-4567", { maxLength: 9, required: true })}
               {field("Dirección", "address", "Ej: Col. Escalón, San Salvador", { maxLength: DIRECCION_MAX })}
               {field("DUI", "dui", "Ej: 01234567-8", { maxLength: 10 })}
+              {field("Correo (opcional)", "email", "Ej: cliente@correo.com", { maxLength: 150 })}
               {error && (
                 <div style={{ background: "rgba(163,18,18,0.12)", border: "1px solid rgba(163,18,18,0.35)", borderRadius: 8, padding: "8px 12px", color: "#e87070", fontSize: 12 }}>
                   {error}
