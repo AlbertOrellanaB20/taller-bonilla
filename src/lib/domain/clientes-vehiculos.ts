@@ -67,7 +67,21 @@ export async function listClientes(): Promise<Client[]> {
     .from("cliente")
     .select("id_cliente, nombre_completo, telefono, direccion, dui, correo")
     .order("nombre_completo");
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Si todavía no se ha corrido el ALTER TABLE que agrega `correo` (ver
+    // database/taller_bonilla_supabase.sql, sección 10.1.2), esta consulta
+    // falla por completo y, como listClientes() se llama desde el layout de
+    // Secretaria y Administrador, tumbaría TODO su panel — no solo la
+    // pantalla de Clientes. Mientras tanto se reintenta sin esa columna y
+    // el correo queda vacío, en vez de romper el resto del sistema.
+    console.error("listClientes (con correo):", error.message);
+    const fallback = await supabase
+      .from("cliente")
+      .select("id_cliente, nombre_completo, telefono, direccion, dui")
+      .order("nombre_completo");
+    if (fallback.error) throw new Error(fallback.error.message);
+    return (fallback.data as Omit<ClienteRow, "correo">[]).map((r) => mapCliente({ ...r, correo: null }));
+  }
   return (data as ClienteRow[]).map(mapCliente);
 }
 

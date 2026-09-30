@@ -170,13 +170,26 @@ async function repuestosPorOrden(
 
 export async function listFacturas(): Promise<Invoice[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const baseSelect =
+    "id_factura, numero_factura, id_orden_servicio, subtotal, iva, total, fecha_emision, estado_factura:id_estado_factura(nombre_estado), metodo_pago:id_metodo_pago(nombre_metodo), orden_servicio:id_orden_servicio(vehiculo:id_vehiculo(placa, marca, modelo, anio, cliente:id_cliente(nombre_completo, dui%s)), detalle_servicio(precio_aplicado, servicio(nombre_servicio)))";
+
+  let { data, error } = await supabase
     .from("factura")
-    .select(
-      "id_factura, numero_factura, id_orden_servicio, subtotal, iva, total, fecha_emision, estado_factura:id_estado_factura(nombre_estado), metodo_pago:id_metodo_pago(nombre_metodo), orden_servicio:id_orden_servicio(vehiculo:id_vehiculo(placa, marca, modelo, anio, cliente:id_cliente(nombre_completo, dui, correo)), detalle_servicio(precio_aplicado, servicio(nombre_servicio)))",
-    )
+    .select(baseSelect.replace("%s", ", correo"))
     .order("id_factura", { ascending: false });
-  if (error) throw new Error(error.message);
+  if (error) {
+    // Igual que en listClientes(): si `cliente.correo` todavía no existe
+    // (falta correr el ALTER TABLE de taller_bonilla_supabase.sql sección
+    // 10.1.2), no se debe romper TODO el panel de Secretaria/Administrador
+    // por esto — se reintenta sin esa columna.
+    console.error("listFacturas (con correo):", error.message);
+    const fallback = await supabase
+      .from("factura")
+      .select(baseSelect.replace("%s", ""))
+      .order("id_factura", { ascending: false });
+    if (fallback.error) throw new Error(fallback.error.message);
+    data = fallback.data;
+  }
 
   const rows = data as unknown as FacturaRow[];
   const ordenIds = rows.map((f) => f.id_orden_servicio);
