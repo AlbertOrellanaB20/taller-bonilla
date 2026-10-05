@@ -9,8 +9,11 @@ Si esta sesión se corta, retómala con `claude --continue` y sigue desde la fas
 - [x] Variables en Vercel Production: NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, GMAIL_USER, GMAIL_APP_PASSWORD — **las 5 existen**.
 - [x] Último despliegue de producción: READY (dpl_Cui8naofgu9dJAg99tRBYgYPUFT5, commit 6b1eabc).
 - [x] /api/keep-alive existe (src/app/api/keep-alive/route.ts) con cron diario en vercel.json (0 12 * * *).
-- [ ] Confirmar Supabase activo y datos del seed presentes — pendiente.
+- [x] Confirmar Supabase activo y datos del seed presentes — **confirmado**: usuario (5), cliente (10), vehiculo (11), orden_servicio (11), detalle_servicio (15), servicio (11), proveedor (6), repuesto (13), detalle_repuesto (16), factura (5). Los 3 usuarios clave de la demo (`erodriguez`, `narias`, `jrodas`) existen y están activos.
 - [ ] Logs de runtime de Vercel: la herramienta del MCP falla con 403 (mismo límite de permisos de equipo ya reportado en sesiones anteriores) — no se puede revisar por esta vía. Se usará consola del navegador por pantalla en su lugar.
+
+## Nota — interrupción por disco lleno (2026-10-05)
+El disco C: del usuario se llenó al 100% a mitad de esta pasada (Descargas pesaba 30.6 GB). Se liberó la caché `.next` (438 MB) para poder seguir trabajando temporalmente, y el usuario liberó espacio manualmente después (quedaron ~5 GB libres). Ya se corrigió `npm install`, `tsc --noEmit` y `npm run build` sin errores tras esto. Commit de esta pasada: `5a4f107` (cambio de Resend a Gmail para el envío de facturas por correo).
 
 ## Fase 1 — Login y sesión
 - [ ] Pendiente
