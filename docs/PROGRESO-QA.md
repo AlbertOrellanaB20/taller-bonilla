@@ -16,7 +16,11 @@ Si esta sesión se corta, retómala con `claude --continue` y sigue desde la fas
 El disco C: del usuario se llenó al 100% a mitad de esta pasada (Descargas pesaba 30.6 GB). Se liberó la caché `.next` (438 MB) para poder seguir trabajando temporalmente, y el usuario liberó espacio manualmente después (quedaron ~5 GB libres). Ya se corrigió `npm install`, `tsc --noEmit` y `npm run build` sin errores tras esto. Commit de esta pasada: `5a4f107` (cambio de Resend a Gmail para el envío de facturas por correo).
 
 ## Fase 1 — Login y sesión
-- [ ] Pendiente
+- [x] **Login de los 5 roles** (por el formulario real, contra `npm run dev` local): `aorellana`→`/admin`, `nguzman`→`/supervisora`, `erodriguez`→`/secretaria`, `narias`→`/mecanico`, `jrodas`→`/inventario`. Los 5 redirigen al panel correcto.
+- [x] **Menú de cada rol coincide exacto con la tabla de permisos** del CLAUDE.md (verificado leyendo la navegación real de cada uno): Admin ve los 10 módulos; Supervisora solo Dashboard/Órdenes/Empleados/Reportes; Secretaria solo Dashboard/Clientes/Vehículos/Órdenes/Facturación; Mecánico solo Dashboard/Mis Órdenes; Inventario solo Dashboard/Repuestos/Proveedores.
+- [x] **Protección cruzada por rol — las 20 combinaciones** (los 5 usuarios probando entrar a los 4 paneles ajenos escribiendo la URL directo): las 20 redirigen de vuelta a su propio panel. Ninguna dejó entrar.
+- [x] **Cerrar sesión funciona de verdad**: después de "Cerrar sesión", intentar volver a `/admin` (u otro panel) sin loguearse redirige a `/login` — no era solo un cambio visual, la cookie de sesión se invalida.
+- [x] **Mensajes de error de login**: contraseña incorrecta y usuario inexistente muestran el mismo mensaje genérico "Usuario o contraseña incorrectos." — correcto, no revela si el usuario existe (buena práctica de seguridad).
 
 ## Fase 2 — Pasada completa por rol
 - [ ] Pendiente
@@ -45,4 +49,7 @@ cada fase se commitea y empuja directo a master, y solo se detiene el push si al
 queda roto.
 
 ## Errores encontrados en esta pasada
-(se va llenando conforme se prueba)
+
+1. **[BLOQUEA la función de correo] Falta correr el ALTER TABLE de `cliente.correo` en Supabase real.** La columna no existe en la base de datos (confirmado por error de consola: `column cliente.correo does not exist`). El código ya tiene un fallback que evita que la pantalla se rompa, pero sin esta columna no hay correo de cliente que usar al enviar la factura por Gmail (función que se terminó de cablear hoy). El SQL ya existe, solo falta ejecutarlo: `database/taller_bonilla_supabase.sql` línea 314 — `ALTER TABLE cliente ADD COLUMN IF NOT EXISTS correo VARCHAR(150);`. Es seguro (no borra datos). Pendiente que el usuario lo corra en el SQL Editor de Supabase.
+2. **[Revisar en Fase 4] Dashboard de Administrador muestra estadísticas en 0** ("Ingresos del mes: $0.00", "Órdenes activas: 0", "Vehículos en taller: 0", "Stock bajo: 0") mientras la tabla de "Órdenes recientes" debajo sí muestra órdenes reales en Pendiente/En Proceso y "Alertas de inventario" sí muestra repuestos con stock bajo real. Parece un bug en el cálculo de esas 4 tarjetas, no en los datos. Pendiente de investigar en Fase 4.
+3. **[Cosmético] Enlace "¿Olvidaste tu contraseña?" en el login apunta a `#`** — no está implementado. El manual de usuario dice que no hay pantalla de "cambiar mi contraseña" todavía, así que es consistente, pero el enlace visible puede confundir. Considerar ocultarlo o implementarlo antes de la demo.
