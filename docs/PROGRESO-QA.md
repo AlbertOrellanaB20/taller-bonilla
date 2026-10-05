@@ -23,7 +23,16 @@ El disco C: del usuario se llenó al 100% a mitad de esta pasada (Descargas pesa
 - [x] **Mensajes de error de login**: contraseña incorrecta y usuario inexistente muestran el mismo mensaje genérico "Usuario o contraseña incorrectos." — correcto, no revela si el usuario existe (buena práctica de seguridad).
 
 ## Fase 2 — Pasada completa por rol
-- [ ] Pendiente
+Se probó el flujo completo de una visita real, de principio a fin, verificando cada paso contra Supabase (no solo contra lo que muestra la pantalla):
+
+- [x] **Secretaria** — `crearCliente()`: cliente nuevo con correo guardado bien (tras corregir mi propio error de prueba: el nombre no puede tener números, la validación lo bloqueó correctamente). `crearVehiculo()`: vehículo nuevo asignado al cliente. `crearOrden()` con 2 servicios (Cambio de aceite $15 + Frenos $30): el trigger calculó solo el total en $45.
+- [x] **Supervisora** — `reasignarMecanico()` y `cambiarEstadoOrden()` a "En Proceso": ambos confirmados en la base de datos.
+- [x] **Mecánico** — `marcarServicioCompletado()` en ambos servicios. `agregarRepuestoAOrden()` (2x Filtro de aceite): el stock bajó solo de 27→25 y el total de la orden subió solo de $45→$54. `avanzarEstadoOrden()` a "Finalizado": `fecha_entrega_real` se llenó sola.
+- [x] **Secretaria (facturación)** — `generarFactura()`: creó FAC-0006 ($61.02 con IVA) y la orden pasó sola a "Entregado". `enviarFacturaPorCorreo()`: el servidor lo procesó sin errores en ~3s (tiempo típico de un envío SMTP real) — **pendiente que el usuario confirme en su Gmail que la recibió**. `marcarFacturaPagada()`: confirmado, pasó a "Pagada".
+- [x] **Administrador (usuarios)** — `crearUsuario()`: probé primero una contraseña débil (el indicador de fortaleza y la validación funcionaron en tiempo real, bloqueando el envío) y luego una fuerte — se creó bien tanto en Supabase Auth como en la tabla `usuario`, vinculados por `auth_user_id`. `toggleActivoUsuario()`: al desactivar, el login de ese usuario quedó bloqueado con un mensaje claro ("Este usuario está desactivado. Contacta al administrador.").
+- [x] **Inventario** — `ajustarStock()` (entrada de 5 unidades): stock subió de 25→30. `crearProveedor()` y `toggleActivoProveedor()`: desactivar/activar funciona, y un proveedor inactivo correctamente desaparece del selector al crear un repuesto nuevo. `crearRepuesto()`: repuesto nuevo guardado con todos sus datos.
+
+Nota: no se probó explícitamente `anularFactura()` ni las pantallas de Admin → Configuración/Reportes a fondo — quedan para una revisión posterior si hace falta, no son parte del flujo crítico de la demo.
 
 ## Fase 3 — Base de datos real y tiempo real
 - [ ] Pendiente
@@ -53,3 +62,6 @@ queda roto.
 1. ~~**[BLOQUEA la función de correo] Falta correr el ALTER TABLE de `cliente.correo` en Supabase real.**~~ **RESUELTO** — el usuario corrió el `ALTER TABLE cliente ADD COLUMN IF NOT EXISTS correo VARCHAR(150);` en Supabase. Verificado por consulta directa: la columna existe (clientes existentes tienen `correo: null` porque se registraron antes de este campo — hay que llenárselo manualmente a cada uno desde el formulario de edición para poder probar el envío de factura por correo con ellos).
 2. **[Revisar en Fase 4] Dashboard de Administrador muestra estadísticas en 0** ("Ingresos del mes: $0.00", "Órdenes activas: 0", "Vehículos en taller: 0", "Stock bajo: 0") mientras la tabla de "Órdenes recientes" debajo sí muestra órdenes reales en Pendiente/En Proceso y "Alertas de inventario" sí muestra repuestos con stock bajo real. Parece un bug en el cálculo de esas 4 tarjetas, no en los datos. Pendiente de investigar en Fase 4.
 3. **[Cosmético] Enlace "¿Olvidaste tu contraseña?" en el login apunta a `#`** — no está implementado. El manual de usuario dice que no hay pantalla de "cambiar mi contraseña" todavía, así que es consistente, pero el enlace visible puede confundir. Considerar ocultarlo o implementarlo antes de la demo.
+4. **[No tiene arreglo fácil, solo anotarlo] No se puede editar un cliente ya creado.** No existe `actualizarCliente()` en el código — solo se puede poner el correo (u otros datos) al momento de crear el cliente. Si se necesita agregarle el correo a uno de los clientes ya existentes (los 10 originales no tienen correo), hoy no hay forma desde la pantalla.
+5. **[Revisar en Fase 4] La página de Órdenes del Supervisor siempre dice "Dashboard" arriba.** `/supervisora/ordenes` reutiliza el componente del Dashboard (`SupervisoraHome` con prop `focusTable`) en vez de tener su propio título — confirmado en el código (`src/app/supervisora/ordenes/page.tsx` y `supervisora-home.tsx:289`, el `<h1>` está fijo en "Dashboard" sin importar la ruta). Funciona bien, solo el título es confuso.
+6. **[Cosmético] Typo gramatical** en el buscador de Vehículos (Secretaria): "Buscar por placa, marca, modelo **u** dueño..." debería decir "**o** dueño" (la "u" solo se usa antes de palabras que empiezan con sonido "o").
